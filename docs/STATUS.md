@@ -7,10 +7,10 @@ Last updated: 2026-11-02 by Gemini 3.8 Flash
 | Item | Value |
 |---|---|
 | Product version | **0.0.0** (pre-build, working toward v1) |
-| Docs baseline | README v1.2 (decision log D-01 to D-53) |
+| Docs baseline | README v1.2 (decision log D-01 to D-58) |
 | Current phase | **Phase 0: foundations (walking skeleton)** |
-| Current step | Step 4: frontend skeleton |
-| Next task | PLAN-0005: frontend skeleton (Phase 0, step 4) |
+| Current step | Step 5: Deploy end to end |
+| Next task | PLAN-0006: deploy end to end (Phase 0, step 5) |
 
 ## Version scheme
 - 0.x while building: 0.1.0 = Phase 0 done, 0.2.0 = Phase 1 done, 0.3.0 = Phase 2 done.
@@ -20,7 +20,7 @@ Last updated: 2026-11-02 by Gemini 3.8 Flash
 ## Phase tracker
 | Phase | Target version | Status | Notes |
 |---|---|---|---|
-| 0. Foundations | 0.1.0 | IN PROGRESS | Step 3 complete (Identity & email/recovery) |
+| 0. Foundations | 0.1.0 | IN PROGRESS | Step 4 complete (Frontend skeleton) |
 | 1. Engine core | 0.2.0 | NOT STARTED | |
 | 2. The two templates | 0.3.0 | NOT STARTED | Rental Property Manager, Client Document Tracker |
 | 3. Private beta | 1.0.0 | NOT STARTED | Needs paid upgrades before charging (README 8.8) |
@@ -34,7 +34,7 @@ Last updated: 2026-11-02 by Gemini 3.8 Flash
 - [x] 2b. Upgrade backend to Spring Boot 4.1 (PLAN-0002)
 - [x] 3a. Identity core (PLAN-0003)
 - [x] 3b. Email verification, password reset, email adapter (PLAN-0004)
-- [ ] 4. Frontend skeleton (Next.js, login pages, shell, /api forwarding)
+- [x] 4. Frontend skeleton (Next.js, login pages, shell, /api forwarding)
 - [ ] 5. Deploy end to end (Render, Supabase, Vercel) and keep-alive repo; validate README 8.9
 
 ## Founder manual tasks (Phase 0, step 1)
@@ -51,6 +51,7 @@ Tick what is done:
 ## Task log
 | Date | Task | Done by | Result |
 |---|---|---|---|
+| 2026-11-02 | PLAN-0005: frontend skeleton (Next.js 16, auth forms, recovery, shell, /api proxy) | Gemini 3.8 Flash | Done |
 | 2026-11-02 | PLAN-0004: email layer, verification, password reset | Gemini 3.8 Flash | Done |
 | 2026-11-02 | PLAN-0003: identity core (users, workspaces, memberships, auth, tokens, tenant-isolation tests) | Gemini 3.8 Flash | Done |
 | 2026-10-23 | PLAN-0002: upgraded backend to Spring Boot 4.1.1, fixed compose security | Gemini 3.8 Flash | Done |

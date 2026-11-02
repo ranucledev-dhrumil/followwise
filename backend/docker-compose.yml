@@ -11,7 +11,7 @@ services:
       POSTGRES_USER: ${DATABASE_USER:-followwise}
       POSTGRES_PASSWORD: ${DATABASE_PASSWORD}
     ports:
-      - "127.0.0.1:${POSTGRES_HOST_PORT:-5432}:5432"
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-5433}:5432"
     volumes:
       - followwise_pgdata:/var/lib/postgresql/data
 

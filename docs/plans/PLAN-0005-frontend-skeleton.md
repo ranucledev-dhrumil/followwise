@@ -1,8 +1,8 @@
 # PLAN-0005: Frontend skeleton
 
-Status: APPROVED
+Status: DONE
 Phase / step: Phase 0, step 4
-Author: Gemini (Antigravity planner)   Executor: (model that executed)
+Author: Gemini (Antigravity planner)   Executor: Gemini 3.8 Flash
 Branch: plan-0005
 
 ## Goal
@@ -191,6 +191,65 @@ D-58 Frontend tests: Vitest and React Testing Library for the API client and for
 ---
 ## Execution report (executor fills)
 - What was done:
+  1. Amendment A: Updated backend/src/main/resources/application-local.properties to use app.scheduler-enabled=\; verified backend mvn test passed (45 tests, 0 failures); committed as fix(backend): honor SCHEDULER_ENABLED in local profile.
+  2. Slice 1: Scaffolded Next.js 16 (App Router) in frontend/ with TypeScript strict, Tailwind CSS v4, shadcn/ui, and lucide-react; configured Turbopack CSS loader; removed generated frontend/AGENTS.md; set engines node >=22; added vitest, jsdom, and testing-library; configured next.config.ts with /api/:path* rewrite and security headers (CSP, nosniff, DENY, route-specific Referrer-Policy); aligned design tokens with docs/DESIGN.md; committed as feat(frontend): scaffold Next.js 16 with Tailwind and shadcn.
+  3. Slice 2: Implemented frontend/src/lib/api.ts with in-memory access token, single-flight refreshSession(), auto-retry on 502/503/504 for GETs and refresh only, retry-once on 401 with signout on second 401, X-FollowWise-Client: web and credentials: same-origin headers; added Vitest tests verifying concurrent refresh, retry behavior, auth isolation, and storage isolation (no localStorage/sessionStorage); committed as feat(frontend): API client with token store and refresh.
+  4. Slice 3: Built frontend/src/app/(auth)/layout.tsx, /register, and /login pages with 44px touch targets, Inter font, visible labels, password UTF-8 byte hint (10-72 bytes), problem+JSON error display; created frontend/src/lib/validation.ts and validation.test.ts (covering 9, 10, 72, 73 bytes and multi-byte UTF-8); committed as feat(frontend): register and login pages.
+  5. Slice 4: Built /verify-email, /forgot-password, and /reset-password pages; query params ?token= cleaned immediately with history.replaceState; verification guarded to execute once in React strict mode; committed as feat(frontend): email verification and password reset pages.
+  6. Slice 5: Built protected /app shell with AuthProvider client guard, responsive sidebar/bottom bar, Dashboard workspace list, waking up loading state, email-not-verified alert banner with resend button and 429 Retry-After live countdown; committed as feat(frontend): protected app shell with workspace list.
+  7. Amendment D.3: Verified headers on running production server (npm run build && npm start):
+     - curl -sI http://localhost:3000/reset-password:
+       X-Content-Type-Options: nosniff
+       X-Frame-Options: DENY
+       Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'
+       Referrer-Policy: no-referrer
+     - curl -sI http://localhost:3000/login:
+       X-Content-Type-Options: nosniff
+       X-Frame-Options: DENY
+       Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'
+       Referrer-Policy: strict-origin-when-cross-origin
+  8. Amendment I: Manual end-to-end check performed against running backend with local Postgres:
+     - Register new account via frontend proxy: status 201, accessToken returned, HttpOnly refreshToken cookie set.
+     - Land on /app -> GET /api/me: emailVerified: false (unverified banner active).
+     - Outbox worker delivered verification link to log / outbox: token extracted.
+     - POST /api/auth/verify-email: status 200.
+     - Reload /app -> POST /api/auth/refresh: status 200, session restored with new accessToken; GET /api/me confirms emailVerified: true (banner gone).
+     - POST /api/auth/logout: status 204.
+     - POST /api/auth/login: status 200.
+     - POST /api/auth/forgot-password: status 204; reset token extracted from outbox.
+     - POST /api/auth/reset-password: status 200.
+     - Verification: old refresh token cookie rejected (401), old password rejected (401), new password login succeeds (200).
+  9. Slice 6: Appended D-54 through D-58 to README.md §14.1; updated docs/STATUS.md (ticked step 4, added task log, set next task to PLAN-0006).
+
+- Exact versions used:
+  - Node: v22.15.0 (engines: >=22)
+  - next: 16.4.4
+  - react: 19.3.0
+  - react-dom: 19.3.0
+  - tailwindcss: 4.2.0 (@tailwindcss/turbopack: 4.2.0)
+  - shadcn: 4.23.0
+  - lucide-react: 1.66.0
+  - vitest: 3.2.7
+  - @testing-library/react: 16.3.3
+  - @testing-library/jest-dom: 6.6.3
+  - @vitejs/plugin-react: 4.7.0
+  - vite-tsconfig-paths: 5.1.4
+  - jsdom: 29.1.1
+
 - Commands run and results:
+  - cd backend && mvn test: 45 tests run, 0 failures, BUILD SUCCESS.
+  - cd frontend && npm run lint: 0 errors, 0 warnings.
+  - cd frontend && npm run typecheck: 0 errors.
+  - cd frontend && npm test: 3 test files passed, 13 tests passed (100% green).
+  - cd frontend && npm run build: production build compiled and prerendered static pages successfully.
+  - curl -sI headers checks: verified strict-origin-when-cross-origin vs no-referrer on sensitive paths, DENY, nosniff, and CSP.
+  - Manual E2E script: all 9 end-to-end steps executed and verified green.
+
 - Deviations from the plan:
-- Follow-ups or new risks:
+  - React 19 / eslint 9 react-hooks/set-state-in-effect: initial useEffect data-fetching and token cleanup refactored to use lazy state initialization (useState(() => searchParams.get('token'))) and asynchronous effect execution to avoid synchronous cascading re-renders.
+  - @vitejs/plugin-react: installed ^4.7.0 due to peer conflict with @babel/core 7 in shadcn registry when using unpinned plugin-react 6.x.
+
+- Follow-ups or new risks (Amendment J):
+  - Vercel Node version support to be verified in PLAN-0006.
+  - A Render cold start may exceed proxy timeouts, verify in PLAN-0006.
+  - CSP uses 'unsafe-inline' and should move to nonces later.
