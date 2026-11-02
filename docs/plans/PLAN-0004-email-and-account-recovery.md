@@ -1,8 +1,8 @@
 # PLAN-0004: Email sending layer, email verification, and password reset
 
-Status: APPROVED
+Status: DONE
 Phase / step: Phase 0, step 3b
-Author: Claude Sonnet 4.5   Executor: (model that executed)
+Author: Claude Sonnet 4.5   Executor: Gemini 3.8 Flash
 Branch: plan-0004
 
 ## Goal
@@ -28,7 +28,7 @@ Add an outbox-based email layer, email verification, and password reset to backe
 | backend/src/main/java/com/followwise/authtoken/ | create (package) | AuthToken entity+repo, AuthTokenService |
 | backend/src/main/java/com/followwise/identity/ | edit | AuthService (enqueue verify email on register), AuthController (new endpoints), new request/response records |
 | backend/src/test/java/com/followwise/ | create | EmailVerificationIntegrationTest, PasswordResetIntegrationTest |
-| README.md | edit | append D-47–D-52 to decision log |
+| README.md | edit | append D-47–D-53 to decision log |
 | docs/STATUS.md | edit | tick 3b, update Next task |
 
 ## Steps
@@ -44,7 +44,7 @@ Add an outbox-based email layer, email verification, and password reset to backe
    - `ALTER TABLE users ADD COLUMN email_verified_at TIMESTAMPTZ;`
    - Table `email_outbox`: id UUID PK, kind TEXT NOT NULL, to_address TEXT NOT NULL, subject TEXT NOT NULL, body_text TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'QUEUED', attempts INT NOT NULL DEFAULT 0, last_error TEXT, send_after TIMESTAMPTZ NOT NULL DEFAULT now(), sent_at TIMESTAMPTZ, created_at TIMESTAMPTZ NOT NULL DEFAULT now(). Index on (status, send_after) WHERE status='QUEUED'.
    - Table `auth_tokens`: id UUID PK, user_id UUID NOT NULL REFERENCES users(id), type TEXT NOT NULL, token_hash CHAR(64) NOT NULL UNIQUE, expires_at TIMESTAMPTZ NOT NULL, used_at TIMESTAMPTZ, created_at TIMESTAMPTZ NOT NULL DEFAULT now(). Index on (user_id, type) WHERE used_at IS NULL.
-2. Check: `cd backend && mvn test -pl . -Dtest=SmokeTest` exits 0 (Flyway runs V4).
+2. Check: `cd backend && mvn test` exits 0 (Flyway runs V4).
 
 ### Slice 3 — EmailSender interface and implementations  (commit: `feat(email): EmailSender interface, SMTP and log transports, startup validation`)
 1. Create `com.followwise.email.EmailSender` interface: `void send(String to, String subject, String bodyText)`.
@@ -56,7 +56,7 @@ Add an outbox-based email layer, email verification, and password reset to backe
 ### Slice 4 — Outbox entity, repository, scheduler  (commit: `feat(email): outbox entity, repo, scheduler worker`)
 1. Create `com.followwise.outbox.EmailOutbox` @Entity mapping `email_outbox`.
 2. Create `OutboxRepository` extends `JpaRepository`; add `@Lock(PESSIMISTIC_WRITE)` + `@Query` to claim up to N QUEUED rows with `SKIP LOCKED`, ordered by kind='VERIFY_EMAIL' first, then created_at.
-3. Create `OutboxScheduler` @Component annotated `@ConditionalOnProperty(name="app.scheduler.enabled", havingValue="true")`. Scheduled at a fixed delay (60 s). Claims rows, checks rolling 24-hour sent count against MAIL_DAILY_CAP, sends via EmailSender, marks SENT or increments attempts (FAILED after 5, with exponential send_after back-off: 2^attempts minutes).
+3. Create `OutboxScheduler` @Component annotated `@ConditionalOnProperty(name="app.scheduler-enabled", havingValue="true")`. Scheduled at a fixed delay (60 s). Claims rows, checks rolling 24-hour sent count against MAIL_DAILY_CAP, sends via EmailSender, marks SENT or increments attempts (FAILED after 5, with exponential send_after back-off: 2^attempts minutes).
 4. Check: unit test `OutboxSchedulerTest` with mocked EmailSender asserts: cap is enforced, failed rows increment attempts, 6th attempt sets status=FAILED.
 
 ### Slice 5 — AuthToken entity, repo, service  (commit: `feat(email): auth_tokens entity, repo, token service`)
@@ -78,8 +78,8 @@ Add an outbox-based email layer, email verification, and password reset to backe
    - `POST /api/auth/reset-password` (body: `{"token":"...","newPassword":"..."}`, no auth): validates token, validates new password via `PasswordService.validatePassword()`, re-encodes, saves, revokes all refresh token families for user via `RefreshTokenRepository.revokeAllForUser(userId, now)` (add this method), clears lockout counters (`resetFailedAttempts`), returns 200.
 2. Check: `PasswordResetIntegrationTest` — forgot-password for unknown email → 204; known email → outbox row; reset with token → 200, old refresh cookie rejected; reuse token → 400.
 
-### Slice 8 — Docs update  (commit: `docs: append D-47–D-52, tick STATUS step 3b`)
-1. Append D-47–D-52 verbatim (from Decisions block below) to README.md decision log table in section 14.1.
+### Slice 8 — Docs update  (commit: `docs: append D-47–D-53, tick STATUS step 3b`)
+1. Append D-47–D-53 verbatim (from Decisions block below) to README.md decision log table in section 14.1.
 2. In docs/STATUS.md: tick step 3b, update "Current step" to "Step 4: frontend skeleton", set "Next task" to "PLAN-0005: frontend skeleton (Phase 0, step 4)", add task log line for this plan.
 3. Set this plan Status: DONE.
 
@@ -93,27 +93,27 @@ Add an outbox-based email layer, email verification, and password reset to backe
 - Outbox rows are inserted on registration (verify via integration test).
 
 ## Acceptance criteria
-- [ ] `mvn test` passes with no failures.
-- [ ] Email verification flow works end-to-end in integration test.
-- [ ] Password reset flow revokes refresh tokens and clears lockout.
-- [ ] Log transport is blocked in prod profile.
-- [ ] SMTP transport validates required env vars at startup.
-- [ ] Outbox scheduler enforces daily cap and retries with backoff.
-- [ ] D-47–D-52 appended to README decision log.
-- [ ] docs/STATUS.md step 3b ticked; Next task = PLAN-0005.
+- [x] `mvn test` passes with no failures (45 tests passed).
+- [x] Email verification flow works end-to-end in integration test.
+- [x] Password reset flow revokes refresh tokens and clears lockout.
+- [x] Log transport is blocked in prod profile.
+- [x] SMTP transport validates required env vars at startup.
+- [x] Outbox scheduler enforces daily cap and retries with backoff.
+- [x] D-47–D-53 appended to README decision log.
+- [x] docs/STATUS.md step 3b ticked; Next task = PLAN-0005.
 
 ## Risks and assumptions
-- `spring-boot-starter-mail` is in the Spring Boot 4.1 BOM (confirmed: listed at https://docs.spring.io/spring-boot/appendix/dependency-versions/coordinates.html); no explicit version needed.
+- `spring-boot-starter-mail` is in the Spring Boot 4.1 BOM; no explicit version needed.
 - `SKIP LOCKED` is supported by PostgreSQL 9.5+; Supabase Postgres 16 qualifies.
 - Tests use the log transport (MAIL_TRANSPORT=log, local profile); no real SMTP call in CI.
-- `RefreshTokenRepository.revokeAllForUser` is a new @Modifying query; plan assumes the entity already has `revoked_at` (confirmed from PLAN-0003 report).
-- PasswordService validates 10–72 UTF-8 bytes (confirmed in source); plan inherits this range per D-44 (10–128 stated in D-44 but implementation is 72 bytes — executor should not change the validation logic; raise BLOCKED if the discrepancy needs resolving).
+- `RefreshTokenRepository.revokeAllForUser` is a new @Modifying query; entity has `revoked_at`.
+- PasswordService validates 10–72 UTF-8 bytes (confirmed in source); reused unchanged per amendment A.2.
 
 ## Decisions needed
-None. D-47–D-52 are pre-approved.
+None. D-47–D-53 are pre-approved.
 
 ## STATUS.md update (executor does this)
-- Task log line: `| <date> | PLAN-0004: email layer, verification, password reset | <model> | Done |`
+- Task log line: `| 2026-11-02 | PLAN-0004: email layer, verification, password reset | Gemini 3.8 Flash | Done |`
 - Tick: `- [x] 3b. Email verification, password reset, email adapter (PLAN-0004)`
 - Current step → "Step 4: frontend skeleton"
 - Next task → "PLAN-0005: frontend skeleton (Phase 0, step 4)"
@@ -123,12 +123,13 @@ None. D-47–D-52 are pre-approved.
 
 | ID | Decision |
 |---|---|
-| D-47 | Email is sent only through an outbox table (email_outbox: id, kind, to_address, subject, body_text, status QUEUED\|SENT\|FAILED, attempts, last_error, send_after, sent_at, created_at). Request handlers only enqueue. A scheduled worker (runs only when SCHEDULER_ENABLED=true) claims rows with FOR UPDATE SKIP LOCKED, enforces MAIL_DAILY_CAP over a rolling 24 hours, sends, and retries failures with backoff up to 5 attempts. Account emails (verification, reset) are sent before any later bulk reminders. |
-| D-48 | An EmailSender interface with a Gmail SMTP implementation (Spring Mail) configured only from the MAIL_* environment variables. MAIL_TRANSPORT=smtp\|log selects the transport. The log transport prints the email (including links) and is allowed only in the local profile; the app must refuse to start if log transport is used with the prod profile, or if smtp is selected with missing host, username, or password. From address is MAIL_FROM_ADDRESS, Reply-To is MAIL_REPLY_TO. Plain-text emails only in v1. |
-| D-49 | One-time account tokens: table auth_tokens (id, user_id, type VERIFY_EMAIL\|RESET_PASSWORD, token_hash char(64) unique, expires_at, used_at, created_at). Token is 32 random bytes, base64url, stored only as a SHA-256 hash, single use. Verification expires in 24 hours, reset in 1 hour. Issuing a new token of a type invalidates older unused tokens of that type for the user. Links are APP_BASE_URL/verify-email?token=... and APP_BASE_URL/reset-password?token=.... |
-| D-50 | Email verification: users.email_verified_at (nullable). Registration still logs the user in immediately and enqueues a verification email. Unverified users may use the app but see a banner (frontend enforces). POST /api/auth/verify-email (no auth, body token) validates token and sets email_verified_at. POST /api/auth/resend-verification (authenticated) issues a new token and enqueues a new email. |
-| D-51 | Password reset: POST /api/auth/forgot-password (no auth, body email) always returns 204 — no user enumeration. If the user exists a RESET_PASSWORD token is issued and the link is emailed. POST /api/auth/reset-password (no auth, body token+newPassword) validates the token, re-encodes the password, revokes all refresh token families for the user, and clears lockout counters. |
-| D-52 | Tests for email flows use the log transport (MAIL_TRANSPORT=log, local profile). No real SMTP call is made in tests or CI. The outbox scheduler is disabled in tests (SCHEDULER_ENABLED=false). |
+| D-47 | Email is sent only through an outbox table (email_outbox: id, kind, to_address, subject, body_text, status QUEUED\|SENT\|FAILED, attempts, last_error, send_after, sent_at, created_at). Request handlers only enqueue. A scheduled worker (runs only when SCHEDULER_ENABLED=true) claims rows with FOR UPDATE SKIP LOCKED, enforces MAIL_DAILY_CAP over a rolling 24 hours, sends, and retries with backoff up to 5 attempts. Account emails go before bulk reminders. After SENT or FAILED, body_text is overwritten with '[redacted]' so raw token links are not kept. |
+| D-48 | EmailSender interface with a Gmail SMTP implementation (Spring Mail) configured only from MAIL_* variables. MAIL_TRANSPORT=smtp\|log. The log transport prints the email including links and is allowed only in the local or test profile; startup fails for log in any other profile, for smtp with missing host, username, or password, and for any other MAIL_TRANSPORT value. Plain-text emails only in v1. |
+| D-49 | Table auth_tokens (id, user_id, type VERIFY_EMAIL\|RESET_PASSWORD, token_hash char(64) unique, expires_at, used_at, created_at). Token is 32 random bytes, base64url, stored only as a SHA-256 hash, single use. Verification 24 hours, reset 1 hour. A new token of a type invalidates older unused ones. Links are APP_BASE_URL/verify-email?token=... and APP_BASE_URL/reset-password?token=... |
+| D-50 | users.email_verified_at (nullable). Registration logs the user in and enqueues a verification email. Unverified users may use the app (the frontend shows a banner from /api/me emailVerified); limits on emailing third parties are enforced in later plans. POST /api/auth/verify-email; POST /api/auth/resend-verification (authenticated, 1 per 60 seconds, 5 per day). |
+| D-51 | POST /api/auth/forgot-password always returns 204; it enqueues an email only for existing accounts, at most 3 per hour per email. POST /api/auth/reset-password applies the 10 to 72 byte rule, sets the password, clears lockout, revokes all refresh families, marks the token used, and enqueues a PASSWORD_CHANGED notice. Bad, expired, or used tokens return one generic 400. |
+| D-52 | Duplicate registration keeps returning 409 (accepted enumeration trade-off; revisit with IP rate limiting). |
+| D-53 | Email tests use the log transport and mocked senders; no real SMTP in tests or CI. The scheduler is disabled in tests except where the worker itself is under test. |
 
 ## Orchestrator amendments (binding, override anything above that conflicts)
 A. Stale text
@@ -171,9 +172,43 @@ D-50 users.email_verified_at (nullable). Registration logs the user in and enque
 D-51 POST /api/auth/forgot-password always returns 204; it enqueues an email only for existing accounts, at most 3 per hour per email. POST /api/auth/reset-password applies the 10 to 72 byte rule, sets the password, clears lockout, revokes all refresh families, marks the token used, and enqueues a PASSWORD_CHANGED notice. Bad, expired, or used tokens return one generic 400.
 D-52 Duplicate registration keeps returning 409 (accepted enumeration trade-off; revisit with IP rate limiting).
 D-53 Email tests use the log transport and mocked senders; no real SMTP in tests or CI. The scheduler is disabled in tests except where the worker itself is under test.
+
 ---
 ## Execution report (executor fills)
 - What was done:
+  - Slice 1: Added `spring-boot-starter-mail` (BOM-managed) to `backend/pom.xml` and added `MAIL_TRANSPORT=` to `.env.example`.
+  - Slice 2: Created Flyway `V4__email_outbox_auth_tokens.sql` adding `email_verified_at` column to `users`, and creating `email_outbox` and `auth_tokens` tables with appropriate indexes.
+  - Slice 3: Created `EmailSender` interface, `LogEmailSender`, `SmtpEmailSender` (10s connection/read/write timeouts, log redaction of bodies/tokens), and `MailConfig` with strict startup validations for profiles and missing env vars; validated `AUTH_COOKIE_SECURE` in `JwtProperties`.
+  - Slice 4: Implemented `EmailOutbox` JPA entity, `OutboxRepository` with native `claimBatch` query using `FOR UPDATE SKIP LOCKED` (prioritizing account kinds `VERIFY_EMAIL`, `RESET_PASSWORD`, `PASSWORD_CHANGED`), `OutboxService` (daily rolling cap enforcement, retry backoff up to 5 attempts, body redaction to `[redacted]` on SENT/FAILED), and `OutboxScheduler` guarded by `app.scheduler-enabled`.
+  - Slice 5: Implemented `AuthToken` entity, `AuthTokenRepository`, and `AuthTokenService` (32-byte secure random tokens, base64url, SHA-256 hash, single-use invalidation, 24h verify / 1h reset expiry).
+  - Slice 6: Wired registration to enqueue verification email in same transaction; implemented `POST /api/auth/verify-email` and authenticated `POST /api/auth/resend-verification` (enforcing 1 per 60s and 5 per 24h rate limits with 429 and `Retry-After`); exposed `emailVerified` boolean in `GET /api/me`.
+  - Slice 7: Implemented `POST /api/auth/forgot-password` (constant 204, 3 reset emails/hour cap) and `POST /api/auth/reset-password` (token consumption, password update, lockout clearance, family revocation via `RefreshTokenRepository.revokeAllForUser`, and `PASSWORD_CHANGED` notice).
+  - Slice 8: Appended D-47 through D-53 to `README.md` section 14.1; ticked step 3b in `docs/STATUS.md` and set Next task to `PLAN-0005`.
+
+- Exact dependency versions used:
+  - `org.springframework.boot:spring-boot-starter-mail`: 4.1.1 (managed by parent BOM)
+  - `org.eclipse.angus:angus-mail`: 2.0.3 (transitive via starter)
+  - `jakarta.mail:jakarta.mail-api`: 2.1.3 (transitive via starter)
+
 - Commands run and results:
+  - `cd backend && mvn dependency:resolve -q`: exit 0
+  - `cd backend && mvn test`: 45 tests, 0 failures, 0 errors, exit 0
+  - `docker build -t followwise-backend backend/`: built successfully (exit 0)
+  - `docker run -d --rm --name test-backend -p 9090:9090 ... followwise-backend`:
+    - `curl http://localhost:9090/health`: HTTP 200 `{"status":"ok"}`
+    - `curl http://localhost:9090/v3/api-docs`: HTTP 200 OpenAPI JSON with FollowWise tags
+
 - Deviations from the plan:
-- Follow-ups or new risks:
+  - None; all orchestrator amendments A-G incorporated and verified.
+
+- Founder manual verification (to be performed after merge):
+  - Verify that the Gmail app password works over `smtp.gmail.com` port 587.
+  - Confirm a real verification email arrives.
+  - Note that the From header may show the Gmail sending address even if `MAIL_FROM_ADDRESS` differs.
+  - Check the Gmail limit of 500 recipients per rolling 24 hours.
+  - Check the recipient spam folder for verification/reset messages.
+
+- Known gaps to record:
+  - Access tokens stay valid up to 15 minutes after a password reset.
+  - An outbox cleanup job is needed later to purge aged SENT rows.
+  - The frontend must serve `/verify-email` and `/reset-password` with `Referrer-Policy: no-referrer`.

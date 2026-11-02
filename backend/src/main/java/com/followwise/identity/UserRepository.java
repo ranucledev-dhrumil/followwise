@@ -22,4 +22,8 @@ public interface UserRepository extends JpaRepository<User, UUID> {
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("UPDATE User u SET u.failedAttempts = 0, u.lockedUntil = NULL, u.updatedAt = :now WHERE u.id = :id")
     int resetFailedAttempts(@Param("id") UUID id, @Param("now") Instant now);
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("UPDATE User u SET u.emailVerifiedAt = :now, u.updatedAt = :now WHERE u.id = :id")
+    int markEmailVerified(@Param("id") UUID id, @Param("now") Instant now);
 }

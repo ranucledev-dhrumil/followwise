@@ -18,7 +18,9 @@ public class JwtProperties {
     @Value("${jwt.refresh-ttl-days:30}")
     private long refreshTtlDays;
 
-    @Value("${auth.cookie-secure:true}")
+    @Value("${auth.cookie-secure:}")
+    private String cookieSecureRaw;
+
     private boolean cookieSecure;
 
     @PostConstruct
@@ -26,6 +28,10 @@ public class JwtProperties {
         if (secret == null || secret.getBytes(StandardCharsets.UTF_8).length < 32) {
             throw new IllegalStateException("JWT_SECRET must be at least 32 UTF-8 bytes");
         }
+        if (!"true".equals(cookieSecureRaw) && !"false".equals(cookieSecureRaw)) {
+            throw new IllegalStateException("AUTH_COOKIE_SECURE must be exactly 'true' or 'false'");
+        }
+        this.cookieSecure = Boolean.parseBoolean(cookieSecureRaw);
     }
 
     public String getSecret() {

@@ -27,6 +27,9 @@ public class User {
     @Column(name = "locked_until")
     private Instant lockedUntil;
 
+    @Column(name = "email_verified_at")
+    private Instant emailVerifiedAt;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
@@ -42,6 +45,7 @@ public class User {
         this.passwordHash = passwordHash;
         this.failedAttempts = 0;
         this.lockedUntil = null;
+        this.emailVerifiedAt = null;
         this.createdAt = now;
         this.updatedAt = now;
     }
@@ -84,6 +88,14 @@ public class User {
 
     public void setLockedUntil(Instant lockedUntil) {
         this.lockedUntil = lockedUntil;
+    }
+
+    public Instant getEmailVerifiedAt() {
+        return emailVerifiedAt;
+    }
+
+    public void setEmailVerifiedAt(Instant emailVerifiedAt) {
+        this.emailVerifiedAt = emailVerifiedAt;
     }
 
     public Instant getCreatedAt() {

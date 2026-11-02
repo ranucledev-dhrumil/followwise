@@ -49,7 +49,10 @@ public class SecurityConfig {
                         "/api/auth/register",
                         "/api/auth/login",
                         "/api/auth/refresh",
-                        "/api/auth/logout"
+                        "/api/auth/logout",
+                        "/api/auth/verify-email",
+                        "/api/auth/forgot-password",
+                        "/api/auth/reset-password"
                 ).permitAll();
                 auth.requestMatchers(HttpMethod.GET, "/health").permitAll();
                 if (isLocal) {

@@ -44,6 +44,7 @@ public class UserService {
                 ))
                 .toList();
 
-        return new UserProfileResponse(user.getId(), user.getEmail(), workspaces);
+        boolean emailVerified = user.getEmailVerifiedAt() != null;
+        return new UserProfileResponse(user.getId(), user.getEmail(), emailVerified, workspaces);
     }
 }

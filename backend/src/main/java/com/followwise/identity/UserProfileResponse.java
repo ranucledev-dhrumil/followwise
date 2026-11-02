@@ -6,5 +6,6 @@ import java.util.UUID;
 public record UserProfileResponse(
         UUID id,
         String email,
+        boolean emailVerified,
         List<WorkspaceMembershipDto> workspaces
 ) {}
