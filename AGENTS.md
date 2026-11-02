@@ -69,6 +69,9 @@ Plan numbers are sequential, four digits.
 
 ## 7. Git
 - Branch per plan: `plan-NNNN`. Small commits with clear messages (`feat:`, `fix:`, `docs:`, `chore:`, `test:`).
+- Every plan branch starts from an up-to-date `main`. Never stack one plan branch on another.
+- Merge to `main` (pull request) only after the orchestrator has reviewed the Execution report and the founder has run the checks. Delete the branch after merging.
+- Docs-only updates from the orchestrator (README, STATUS, AGENTS, plan files) are committed directly to `main`.
 - Never force-push. Never rewrite shared history. Never commit generated or build output.
 
 ## 8. Executor checklist before setting DONE
