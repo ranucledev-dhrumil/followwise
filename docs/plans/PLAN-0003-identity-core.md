@@ -1,8 +1,8 @@
 # PLAN-0003: Identity core
 
-Status: APPROVED        <!-- DRAFT -> APPROVED (founder) -> IN PROGRESS -> DONE | BLOCKED -->
+Status: DONE        <!-- DRAFT -> APPROVED (founder) -> IN PROGRESS -> DONE | BLOCKED -->
 Phase / step: Phase 0, step 3a
-Author: Claude Sonnet 4.5   Executor: (model that executed)
+Author: Claude Sonnet 4.5   Executor: Gemini 3.8 Flash
 Branch: plan-0003
 
 ## Goal
@@ -119,11 +119,11 @@ Enable `CookieCsrfTokenRepository.withHttpOnlyFalse()` for `POST /api/auth/refre
 16. App starts with `PORT=9090` and answers on 9090 (from PLAN-0002 check).
 
 ## Acceptance criteria
-- [ ] All 16 checks pass with no test skipped.
-- [ ] `JWT_SECRET` absent or < 32 bytes: app refuses to start (outside test profile).
-- [ ] No secret, credential, or personal data in logs.
-- [ ] No new env var committed with a real value.
-- [ ] `mvn test` needs only Docker running (Testcontainers, no local Postgres required).
+- [x] All 16 checks pass with no test skipped.
+- [x] `JWT_SECRET` absent or < 32 bytes: app refuses to start (no test-profile bypass).
+- [x] No secret, credential, or personal data in logs.
+- [x] No new env var committed with a real value.
+- [x] `mvn test` needs only Docker running (Testcontainers, no local Postgres required).
 
 ## Risks and assumptions
 - Spring Security 7 with Boot 4.1 ships `CookieCsrfTokenRepository` — verify during execution.
@@ -193,6 +193,38 @@ None. D-41 to D-45 are pre-approved. Executor appends them verbatim to README §
 ---
 ## Execution report (executor fills)
 - What was done:
+  - Added Spring Security 7, OAuth2 Resource Server, and Testcontainers 2.0.5 with Postgres 16 support to `backend/pom.xml`.
+  - Converted the test suite to a shared Testcontainers PostgreSQL 16 container via `@ServiceConnection`.
+  - Created Flyway migrations `V2__identity.sql` (users, workspaces, memberships) and `V3__refresh_tokens.sql` (refresh_tokens).
+  - Implemented domain entities and repositories with atomic database counters for lockout and atomic single-statement rotation for refresh tokens.
+  - Implemented `PasswordService` using `DelegatingPasswordEncoder` (bcrypt default) with 10–72 UTF-8 bytes length validation and dummy bcrypt matching on unknown email.
+  - Implemented `AuthService` and `AuthController`: registration (transactional user, workspace, OWNER membership), login (generic 401 on wrong password or locked account), refresh token rotation and family revocation on reuse, logout.
+  - Configured `SecurityConfig`: OAuth2 resource server with Nimbus HS256 `JwtDecoder` verifying issuer "followwise", RFC 9457 `ProblemDetail` error responses for 401/403, and `ClientOriginCheckFilter` requiring `X-FollowWise-Client: web` and matching Origin on refresh/logout.
+  - Implemented workspace endpoints (`GET /api/workspaces`, `/api/workspaces/{id}`, `/api/workspaces/{id}/members`) with central `AccessService` enforcing zero existence leakage (404 for non-members) and role-based permissions (403 for unauthorized members).
+  - Implemented user profile endpoint (`GET /api/me`).
+  - Appended decisions D-41 through D-46 to `README.md` §14.1 decision log.
+  - Added `AUTH_COOKIE_SECURE=` to `.env.example`.
+  - Updated `docs/STATUS.md` ticking step 3a and setting next task to PLAN-0004.
+- Exact dependency versions used:
+  - `org.springframework.boot:spring-boot-starter-security:4.1.1` (pulls Spring Security `7.1.1`)
+  - `org.springframework.boot:spring-boot-starter-oauth2-resource-server:4.1.1` (pulls Nimbus JOSE/JWT `10.9.1`)
+  - `org.springframework.security:spring-security-test:7.1.1`
+  - `org.springframework.boot:spring-boot-starter-webmvc-test:4.1.1`
+  - `org.springframework.boot:spring-boot-testcontainers:4.1.1`
+  - `org.testcontainers:testcontainers-bom:2.0.5`
+  - `org.testcontainers:testcontainers:2.0.5`
+  - `org.testcontainers:testcontainers-postgresql:2.0.5`
+  - `org.testcontainers:testcontainers-junit-jupiter:2.0.5`
 - Commands run and results:
+  - `cd backend && mvn dependency:tree`: verified single Testcontainers 2.0.5 major version.
+  - `cd backend && mvn test`: all 26 tests passed in 48s.
+  - `docker build -t followwise-backend backend/`: image built successfully.
+  - Docker container running with `PORT=9090` on default profile: `GET /health` returned 200, `GET /v3/api-docs` returned 401.
+  - Docker container running with `SPRING_PROFILES_ACTIVE=local` on `PORT=9090`: `GET /v3/api-docs` returned 200, `GET /health` returned 200.
 - Deviations from the plan:
+  - In Testcontainers 2.0, `PostgreSQLContainer` is non-generic (use `PostgreSQLContainer`, not `PostgreSQLContainer<?>`).
+  - In Spring Boot 4.1, `@AutoConfigureMockMvc` is located in `org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc` and requires `spring-boot-starter-webmvc-test`.
+  - Transaction management on login: `AuthService.login` uses `noRollbackFor = InvalidCredentialsException.class` so that atomic failed attempt counters and lockout state are committed to Postgres on 401 responses.
 - Follow-ups or new risks:
+  - Per amendment E.5: Duplicate email returns 409 (enumeration trade-off until PLAN-0004 adds verification).
+  - Per amendment D.5: Two simultaneous refresh requests with the same cookie will trigger reuse detection; the frontend must serialize refresh calls.
