@@ -1,15 +1,15 @@
 # STATUS (single status log)
 
 Update this file at the end of every task. It is the first thing every model and the founder reads.
-Last updated: 2026-11-03 by Gemini 3.8 Flash
+Last updated: 2026-11-03 by orchestrator (repo review)
 
 ## Current
 | Item | Value |
 |---|---|
-| Product version | **0.0.0** (pre-build, working toward v1) |
-| Docs baseline | README v1.2 (decision log D-01 to D-59) |
-| Current phase | **Phase 0 complete, pending founder acceptance** |
-| Current step | Step 5 deployed, pending founder acceptance |
+| Product version | **0.1.0 pending** (Phase 0 built; tag v0.1.0 to be re-created on the final main commit after acceptance) |
+| Docs baseline | README v1.2 (decision log D-01 to D-60) |
+| Current phase | **Phase 0 built, founder acceptance pending** |
+| Current step | Acceptance checks (below), then re-tag v0.1.0 |
 | Next task | PLAN-0007: Phase 1 engine core planning (App Definition schema) |
 
 ## Version scheme
@@ -20,7 +20,7 @@ Last updated: 2026-11-03 by Gemini 3.8 Flash
 ## Phase tracker
 | Phase | Target version | Status | Notes |
 |---|---|---|---|
-| 0. Foundations | 0.1.0 | IN PROGRESS | Step 4 complete (Frontend skeleton) |
+| 0. Foundations | 0.1.0 | BUILT, ACCEPTANCE PENDING | All 5 steps built; live on Render, Supabase, Vercel |
 | 1. Engine core | 0.2.0 | NOT STARTED | |
 | 2. The two templates | 0.3.0 | NOT STARTED | Rental Property Manager, Client Document Tracker |
 | 3. Private beta | 1.0.0 | NOT STARTED | Needs paid upgrades before charging (README 8.8) |
@@ -29,7 +29,7 @@ Last updated: 2026-11-03 by Gemini 3.8 Flash
 | 6. Growth | 2.x | NOT STARTED | UK, SMS/WhatsApp, payments, mobile |
 
 ## Phase 0 steps
-- [ ] 1. Accounts and repository (founder manual tasks below, then commit the docs bootstrap)
+- [x] 1. Accounts and repository
 - [x] 2. Backend skeleton (built and verified on Spring Boot 3.3.5; to be upgraded to 4.1 in PLAN-0002)
 - [x] 2b. Upgrade backend to Spring Boot 4.1 (PLAN-0002)
 - [x] 3a. Identity core (PLAN-0003)
@@ -37,20 +37,43 @@ Last updated: 2026-11-03 by Gemini 3.8 Flash
 - [x] 4. Frontend skeleton (Next.js, login pages, shell, /api forwarding)
 - [x] 5. Deploy end to end (Render, Supabase, Vercel) and keep-alive repo; validate README 8.9
 
-## Founder manual tasks (Phase 0, step 1)
-Tick what is done:
-- [ ] Create a **private** GitHub repository `followwise`; add the bootstrap files; first commit
-- [ ] Create Supabase project (note region, database password, connection string)
-- [ ] Create Render account (no service yet)
-- [ ] Create Vercel account (Hobby plan; link the repo in step 4)
-- [ ] Gmail: turn on 2-step verification and create an app password for the sending account
-- [ ] Store all secrets in a password manager (never in the repo)
+## Founder manual tasks (Phase 0)
+- [x] Private GitHub repository `followwise` with the bootstrap files
+- [x] Supabase project (session pooler connection)
+- [x] Render account and service (free, Docker, root `backend/`)
+- [x] Vercel account and project (Hobby, root `frontend/`)
+- [x] Email: Brevo SMTP relay on port 2525 (Render free blocks 25/465/587); sender verified; first real email SENT
+- [ ] Revoke the old Gmail app password (no longer used; it was exposed in a shared archive on 2026-11-03)
+- [ ] Rotate JWT_SECRET (local, and on Render if the same value is used)
+- [x] Public repo `followwise-keepalive` created with the ping workflow
+- [ ] Keep-alive: confirm a manual run shows HTTP 200 after the backend is awake (first run timed out on a cold start)
+- [ ] Store all secrets in a password manager (never in the repo or in shared archives)
 - [ ] Open the repo in Antigravity; confirm it reads `AGENTS.md`
-- [ ] Later (step 5): create a small **public** repo `followwise-keepalive` for the ping workflow
+
+## Acceptance checklist (PLAN-0006), fill in pass or fail
+| # | Check | Result |
+|---|---|---|
+| 0 | Real email SENT through Brevo | PASS |
+| 1 | GET /health on Render returns {"status":"ok"} | |
+| 2 | GET /api/me through the Vercel URL returns 401 | |
+| 3 | Response headers on the live site match D-57 (curl -I) | |
+| 4 | Register on the live site; land on /app with the unverified banner | |
+| 5 | Verification email arrives; link uses the Vercel URL | |
+| 6 | Verification link works; banner disappears after reload | |
+| 7 | Login in a second browser; no token in localStorage, sessionStorage, or readable cookies | |
+| 8 | Forgot and reset password; old session rejected | |
+| 9 | Logout clears the cookie | |
+| 10 | Render logs show 4 migrations applied | |
+| 11 | After 20 minutes idle with keep-alive off: first request succeeds (30 to 60 s) and the UI shows "waking up" | |
+| 12 | Keep-alive manual run shows HTTP 200 | |
+| 13 | No secrets or tokens in Render logs | |
+| 14 | Supabase project shows Active (not paused) after 24 hours | |
 
 ## Task log
 | Date | Task | Done by | Result |
 |---|---|---|---|
+| 2026-11-03 | Repo review before Phase 1: no secrets in git history; found .env in shared archive (rotate), v0.1.0 tag on wrong commit, last commit message mislabeled, docs missing Brevo (D-60), STATUS stale | Orchestrator | Done |
+| 2026-11-03 | Email switched from Gmail SMTP to Brevo SMTP relay on port 2525 (Render free blocks 25/465/587); first real email SENT | Founder | Done |
 | 2026-11-03 | PLAN-0006: deploy end to end (Phase 0, step 5) | Gemini 3.8 Flash | Done |
 | 2026-11-02 | PLAN-0005: frontend skeleton (Next.js 16, auth forms, recovery, shell, /api proxy) | Gemini 3.8 Flash | Done |
 | 2026-11-02 | PLAN-0004: email layer, verification, password reset | Gemini 3.8 Flash | Done |
@@ -65,7 +88,7 @@ Tick what is done:
 - Plan prices and free-tier user limits: open on purpose (README 13.3).
 - AI provider: open until Phase 5 (README 10.5).
 - UI kit (Tailwind + shadcn/ui proposed in docs/DESIGN.md): confirm at Phase 0, step 4.
-- Founder manual check of real Gmail sending (README plan 0004, section "Founder manual verification"): due before the 0.1.0 tag.
+- Email sender: Brevo with a Gmail address as From will often land in spam (DMARC). Buy a domain and verify it in Brevo before public launch (no code change).
 
 ## Blockers
 None.
@@ -82,3 +105,8 @@ None.
 - Frontend must serve /verify-email and /reset-password with Referrer-Policy: no-referrer (D-57).
 - Duplicate registration returns 409 (enumeration trade-off, D-52).
 - Push a commit to followwise-keepalive at least every 60 days to keep the GitHub Actions schedule active.
+- Tailwind is wired through a custom Turbopack rule (`@tailwindcss/turbopack`) with no PostCSS config. It works, but verify it against the official Tailwind v4 setup before upgrading Next.js or Tailwind.
+- Line endings are CRLF in the repo; add `.gitattributes` with `* text=auto eol=lf`.
+- Code defaults still point at Gmail (`mail.host`) and a daily cap of 400; Brevo free allows 300 per day. Render must set MAIL_DAILY_CAP=250. Change the defaults in a small later plan.
+- The CSP uses 'unsafe-inline' for scripts; move to nonces later.
+- Commit 31b527b is labeled "feat: frontend skeleton (PLAN-0005)" but contains the PLAN-0006 changes. Not rewritten; use correct messages from now on.
