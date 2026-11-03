@@ -3,7 +3,7 @@
 Status: DRAFT        <!-- DRAFT -> APPROVED (founder) -> IN PROGRESS -> DONE | BLOCKED -->
 Phase / step: e.g. Phase 0, step 2
 Author: (planner model)   Executor: (model that executed)
-Branch: plan-NNNN
+Branch: plan-NNNN (created by the founder; AI models run no git)
 
 ## Goal
 One or two sentences.
@@ -39,6 +39,7 @@ One or two sentences.
 ---
 ## Execution report (executor fills)
 - What was done:
-- Commands run and results:
+- Files changed (grouped by slice):
+- Commands run and results (no git commands):
 - Deviations from the plan:
 - Follow-ups or new risks:

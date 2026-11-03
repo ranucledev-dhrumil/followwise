@@ -14,9 +14,12 @@ Stack: Java 21 + Spring Boot 4.1 (`backend/`), PostgreSQL on Supabase, Next.js +
 | **Claude models in Antigravity** | Analysis and implementation PLANS only | Any code change. Executing a plan. |
 | **Non-Claude models (Gemini)** | Execute APPROVED plans, change code, update STATUS | Plan new scope. Execute a plan that is not APPROVED. |
 
+### No AI runs git (binding for every model)
+The founder runs every git command. No planner and no executor creates branches, commits, merges, tags, pushes, or runs any other git command, including read-only ones (status, diff, log). Use plain file reads and searches instead of `git grep`. The orchestrator gives the founder the exact git commands before and after each prompt. The founder names the active branch in the task if it matters.
+
 ### If you are a Claude model
 - You may: read files and write plan files in `docs/plans/` only.
-- You must not: create, edit, or delete any file outside `docs/plans/`; run commands that change state (install, build, migrate, git commit or push, deploy); start executing a plan; write production code in a plan (illustrative snippets of 15 lines or fewer are allowed).
+- You must not: create, edit, or delete any file outside `docs/plans/`; run commands that change state (install, build, migrate, deploy) or any git command; start executing a plan; write production code in a plan (illustrative snippets of 15 lines or fewer are allowed).
 - If asked to implement, reply in one line: "Planner only. Switch to a Gemini model to execute docs/plans/PLAN-NNNN." Then stop.
 
 ### If you are a non-Claude model
@@ -28,8 +31,8 @@ Stack: Java 21 + Spring Boot 4.1 (`backend/`), PostgreSQL on Supabase, Next.js +
 1. Orchestrator writes the task brief (a prompt).
 2. Claude writes `docs/plans/PLAN-NNNN-slug.md` from `docs/plans/TEMPLATE.md`, `Status: DRAFT`.
 3. The founder reviews and changes the status to `APPROVED`.
-4. The executor works on branch `plan-NNNN`, fills the plan's Execution report, updates `docs/STATUS.md`, sets `Status: DONE`.
-5. The founder takes the Execution report to the orchestrator for review, then the next brief.
+4. The founder has already created branch `plan-NNNN`. The executor works on it without running git, fills the plan's Execution report (including the list of files changed, grouped by slice), updates `docs/STATUS.md`, and sets `Status: DONE`.
+5. The founder commits, pushes, and runs the checks, then takes the Execution report and the command outputs to the orchestrator for review, then the next brief.
 Plan numbers are sequential, four digits.
 
 ## 4. Token-saving rules (binding for Claude models, good practice for all)
@@ -67,12 +70,13 @@ Plan numbers are sequential, four digits.
 - Do not collect highly sensitive identifiers (full SSNs, bank logins, health data) in v1.
 - Do not log personal data or document contents.
 
-## 7. Git
-- Branch per plan: `plan-NNNN`. Small commits with clear messages (`feat:`, `fix:`, `docs:`, `chore:`, `test:`).
-- Every plan branch starts from an up-to-date `main`. Never stack one plan branch on another.
-- Merge to `main` (pull request) only after the orchestrator has reviewed the Execution report and the founder has run the checks. Delete the branch after merging.
-- Docs-only updates from the orchestrator (README, STATUS, AGENTS, plan files) are committed directly to `main`.
-- Never force-push. Never rewrite shared history. Never commit generated or build output.
+## 7. Git (founder only)
+- The founder runs every git command. AI models never run git (see section 2).
+- Branch per plan: `plan-NNNN`, created by the founder from an up-to-date `main`. Never stack one plan branch on another.
+- Commit messages use `feat:`, `fix:`, `docs:`, `chore:`, `test:` and describe the real content. Plans say "commit:" per slice; the executor ignores those lines, prints `SLICE n DONE` with the intended message, and lists the files for each slice so the founder can commit once or per slice.
+- Merge to `main` only after the orchestrator has reviewed the Execution report and the founder has run the checks. Delete the branch after merging.
+- Docs-only updates from the orchestrator (README, STATUS, AGENTS, plan files) are committed directly to `main` by the founder.
+- Never force-push. Never rewrite shared history. Never commit generated or build output, `.env` files, or archives of the repo that include them. Share code with `git archive HEAD -o followwise.zip`.
 
 ## 8. Executor checklist before setting DONE
 - Plan's checks pass and results are recorded in the Execution report.
