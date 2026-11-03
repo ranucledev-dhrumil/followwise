@@ -1,16 +1,16 @@
 # STATUS (single status log)
 
 Update this file at the end of every task. It is the first thing every model and the founder reads.
-Last updated: 2026-11-02 by Gemini 3.8 Flash
+Last updated: 2026-11-03 by Gemini 3.8 Flash
 
 ## Current
 | Item | Value |
 |---|---|
 | Product version | **0.0.0** (pre-build, working toward v1) |
-| Docs baseline | README v1.2 (decision log D-01 to D-58) |
-| Current phase | **Phase 0: foundations (walking skeleton)** |
-| Current step | Step 5: Deploy end to end |
-| Next task | PLAN-0006: deploy end to end (Phase 0, step 5) |
+| Docs baseline | README v1.2 (decision log D-01 to D-59) |
+| Current phase | **Phase 0 complete, pending founder acceptance** |
+| Current step | Step 5 deployed, pending founder acceptance |
+| Next task | PLAN-0007: Phase 1 engine core planning (App Definition schema) |
 
 ## Version scheme
 - 0.x while building: 0.1.0 = Phase 0 done, 0.2.0 = Phase 1 done, 0.3.0 = Phase 2 done.
@@ -35,7 +35,7 @@ Last updated: 2026-11-02 by Gemini 3.8 Flash
 - [x] 3a. Identity core (PLAN-0003)
 - [x] 3b. Email verification, password reset, email adapter (PLAN-0004)
 - [x] 4. Frontend skeleton (Next.js, login pages, shell, /api forwarding)
-- [ ] 5. Deploy end to end (Render, Supabase, Vercel) and keep-alive repo; validate README 8.9
+- [x] 5. Deploy end to end (Render, Supabase, Vercel) and keep-alive repo; validate README 8.9
 
 ## Founder manual tasks (Phase 0, step 1)
 Tick what is done:
@@ -51,6 +51,7 @@ Tick what is done:
 ## Task log
 | Date | Task | Done by | Result |
 |---|---|---|---|
+| 2026-11-03 | PLAN-0006: deploy end to end (Phase 0, step 5) | Gemini 3.8 Flash | Done |
 | 2026-11-02 | PLAN-0005: frontend skeleton (Next.js 16, auth forms, recovery, shell, /api proxy) | Gemini 3.8 Flash | Done |
 | 2026-11-02 | PLAN-0004: email layer, verification, password reset | Gemini 3.8 Flash | Done |
 | 2026-11-02 | PLAN-0003: identity core (users, workspaces, memberships, auth, tokens, tenant-isolation tests) | Gemini 3.8 Flash | Done |
@@ -80,3 +81,4 @@ None.
 - Outbox worker holds its DB transaction while sending (claim, release, send, update later).
 - Frontend must serve /verify-email and /reset-password with Referrer-Policy: no-referrer (D-57).
 - Duplicate registration returns 409 (enumeration trade-off, D-52).
+- Push a commit to followwise-keepalive at least every 60 days to keep the GitHub Actions schedule active.

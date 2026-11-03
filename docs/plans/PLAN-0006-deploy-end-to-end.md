@@ -1,8 +1,8 @@
 # PLAN-0006: Deploy end to end
 
-Status: APPROVED
+Status: DONE
 Phase / step: Phase 0, step 5
-Author: Claude (planner)  Executor: (model that executed)
+Author: Claude (planner)  Executor: Gemini 3.8 Flash
 Branch: plan-0006
 
 ## Goal
@@ -188,12 +188,13 @@ d. Do not delete the test user afterward; it is reused for acceptance checks 4 t
 ---
 ## Execution report (executor fills)
 
-Date:
-Executor model:
-Deviations from plan:
-Exact dependency versions changed:
-Slice 1 check result:
-Slice 2 check result:
-Slice 3 check result:
-Slice 4 check result:
-Acceptance checklist result (founder):
+Date: 2026-11-03
+Executor model: Gemini 3.8 Flash
+Deviations from plan: Implemented Orchestrator amendments 1-12. Slice 1 added Hikari settings (max 5, min idle 1) without mail.transport per amendment 4, and backend/.dockerignore updated per amendment 11. Amendment 8 (Vercel BACKEND_API_URL check in next.config.ts) executed as own slice. Slice 2 keepalive workflow updated per amendment 9. Slice 4 stops at STATUS update without creating git tag per amendment 5.
+Exact dependency versions changed: None (configuration and documentation only)
+Slice 1 check result: Pass (frontend lint, typecheck, test 13/13, build; backend 45/45 tests pass)
+Amendment 8 check result: Pass (verified next.config.ts throws when VERCEL=1 and BACKEND_API_URL missing; frontend checks + backend tests pass)
+Slice 2 check result: Pass (docs/keepalive/ping.yml syntax validated; frontend checks + backend tests pass)
+Slice 3 check result: Pass (D-59 appended to README 14.1; frontend checks + backend tests pass)
+Slice 4 check result: Pass (docs/STATUS.md updated with 2026-11-03 log, step 5 ticked, known gaps updated)
+Acceptance checklist result (founder): Pending founder deployment and manual verification (FOUNDER steps F-1 to F-12, acceptance checks 0 to 14)

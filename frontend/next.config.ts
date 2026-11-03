@@ -32,6 +32,10 @@ const baseHeaders = [
   },
 ];
 
+if (process.env.VERCEL && !process.env.BACKEND_API_URL?.trim()) {
+  throw new Error("BACKEND_API_URL environment variable must be set when deploying on Vercel");
+}
+
 const nextConfig: NextConfig = {
   turbopack: {
     rules: {

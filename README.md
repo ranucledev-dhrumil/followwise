@@ -617,6 +617,7 @@ This section is written as standing instructions for any AI tool used to build t
 | D-56 | The access token lives in memory only. The session is restored by a single-flight POST /api/auth/refresh when /app loads; /app is guarded on the client (no middleware or proxy file, no marker cookie). On a 401 the client refreshes once and retries once, then signs out. Only GETs and refresh auto-retry on 502/503/504; POSTs never auto-retry. | In-memory token security and resilient session recovery. |
 | D-57 | Headers via next.config: Referrer-Policy no-referrer on /verify-email and /reset-password only (strict-origin-when-cross-origin elsewhere), nosniff, X-Frame-Options DENY, and a CSP with frame-ancestors 'none'. Token query strings are removed with history.replaceState before any request. | Security headers and token leak prevention. |
 | D-58 | Frontend tests: Vitest and React Testing Library for the API client and forms. lint, typecheck, test, and build must pass. No end-to-end tests yet. | Fast unit and component test suite. |
+| D-59 | Deployment: backend on Render free web service (Docker, root `backend/`), database on Supabase (Session Pooler only — direct connection is IPv6 and fails on Render free). Frontend on Vercel Hobby (root `frontend/`, Node 22). Keep-alive pings `/health` every 10 min from a public repo `followwise-keepalive` using a GitHub Actions cron and `HEALTH_URL` repository variable. Version 0.1.0 tagged on `main` after founder acceptance. | Phase 0, step 5 end-to-end deployment architecture. |
 
 ### 14.2 Rules for AI assistants
 
