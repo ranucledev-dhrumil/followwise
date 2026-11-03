@@ -16,6 +16,7 @@ Spring Boot 4.1 / Java 21 REST API, scheduler, and engine blocks.
    ```bash
    cd backend
    docker compose up -d
+   docker compose --env-file ../.env up -d
    ```
 3. Run the Spring Boot application with the `local` profile:
    ```bash

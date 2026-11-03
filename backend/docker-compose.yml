@@ -3,15 +3,12 @@ services:
     image: postgres:16
     container_name: followwise-postgres
     restart: unless-stopped
-    env_file:
-      - path: ../.env
-        required: true
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-followwise}
-      POSTGRES_USER: ${DATABASE_USER:-followwise}
-      POSTGRES_PASSWORD: ${DATABASE_PASSWORD}
+      POSTGRES_USER: ${DATABASE_USER:?Set DATABASE_USER in ../.env}
+      POSTGRES_PASSWORD: ${DATABASE_PASSWORD:?Set DATABASE_PASSWORD in ../.env}
     ports:
-      - "127.0.0.1:${POSTGRES_HOST_PORT:-5433}:5432"
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-5432}:5432"
     volumes:
       - followwise_pgdata:/var/lib/postgresql/data
 
