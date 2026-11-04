@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "template": "not-mismatched",
+  "name": "Mismatched App",
+  "currency": "USD",
+  "timezone": "America/New_York",
+  "partyTypes": [
+    {
+      "id": "tenant",
+      "label": "Tenant",
+      "fields": [
+        { "id": "name", "label": "Full Name", "type": "text", "required": true }
+      ]
+    }
+  ]
+}

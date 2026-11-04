@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "template": "invalid-property",
+  "name": "Invalid App",
+  "currency": "USD",
+  "timezone": "America/New_York",
+  "unknownProp": "not allowed",
+  "partyTypes": [
+    {
+      "id": "tenant",
+      "label": "Tenant",
+      "fields": [
+        { "id": "name", "label": "Full Name", "type": "text", "required": true }
+      ]
+    }
+  ]
+}

@@ -1,16 +1,16 @@
 # STATUS (single status log)
 
 Update this file at the end of every task. It is the first thing every model and the founder reads.
-Last updated: 2026-11-03 by orchestrator (repo review)
+Last updated: 2026-11-04 by Gemini 3.8 Flash (PLAN-0007)
 
 ## Current
 | Item | Value |
 |---|---|
 | Product version | **0.1.0 pending** (Phase 0 built; tag v0.1.0 to be re-created on the final main commit after acceptance) |
-| Docs baseline | README v1.2 (decision log D-01 to D-60) |
-| Current phase | **Phase 0 built, founder acceptance pending** |
-| Current step | Acceptance checks (below), then re-tag v0.1.0 |
-| Next task | PLAN-0007: Phase 1 engine core planning (App Definition schema) |
+| Docs baseline | README v1.2 (decision log D-01 to D-66) |
+| Current phase | **Phase 1: Engine core** |
+| Current step | Phase 1, step 1b |
+| Next task | PLAN-0008: apps and definition versions API (Phase 1, step 1b) |
 
 ## Version scheme
 - 0.x while building: 0.1.0 = Phase 0 done, 0.2.0 = Phase 1 done, 0.3.0 = Phase 2 done.
@@ -21,7 +21,7 @@ Last updated: 2026-11-03 by orchestrator (repo review)
 | Phase | Target version | Status | Notes |
 |---|---|---|---|
 | 0. Foundations | 0.1.0 | BUILT, ACCEPTANCE PENDING | All 5 steps built; live on Render, Supabase, Vercel |
-| 1. Engine core | 0.2.0 | NOT STARTED | |
+| 1. Engine core | 0.2.0 | IN PROGRESS | |
 | 2. The two templates | 0.3.0 | NOT STARTED | Rental Property Manager, Client Document Tracker |
 | 3. Private beta | 1.0.0 | NOT STARTED | Needs paid upgrades before charging (README 8.8) |
 | 4. Third template + billing | 1.x | NOT STARTED | Tutor / Class Manager |
@@ -36,6 +36,15 @@ Last updated: 2026-11-03 by orchestrator (repo review)
 - [x] 3b. Email verification, password reset, email adapter (PLAN-0004)
 - [x] 4. Frontend skeleton (Next.js, login pages, shell, /api forwarding)
 - [x] 5. Deploy end to end (Render, Supabase, Vercel) and keep-alive repo; validate README 8.9
+
+## Phase 1 steps
+- [x] 1a. App Definition schema and validator (PLAN-0007)
+- [ ] 1b. Apps and definition versions API (PLAN-0008)
+- [ ] 1c. Parties and records with custom fields
+- [ ] 1d. Charges and ledger
+- [ ] 1e. Documents and storage
+- [ ] 1f. Reminder engine
+- [ ] 1g. Forms and dashboard generation
 
 ## Founder manual tasks (Phase 0)
 - [x] Private GitHub repository `followwise` with the bootstrap files
@@ -72,6 +81,7 @@ Last updated: 2026-11-03 by orchestrator (repo review)
 ## Task log
 | Date | Task | Done by | Result |
 |---|---|---|---|
+| 2026-11-04 | PLAN-0007: App Definition schema and validator (Phase 1, step 1a) | Gemini 3.8 Flash | Done |
 | 2026-11-03 | Repo review before Phase 1: no secrets in git history; found .env in shared archive (rotate), v0.1.0 tag on wrong commit, last commit message mislabeled, docs missing Brevo (D-60), STATUS stale | Orchestrator | Done |
 | 2026-11-03 | Email switched from Gmail SMTP to Brevo SMTP relay on port 2525 (Render free blocks 25/465/587); first real email SENT | Founder | Done |
 | 2026-11-03 | PLAN-0006: deploy end to end (Phase 0, step 5) | Gemini 3.8 Flash | Done |

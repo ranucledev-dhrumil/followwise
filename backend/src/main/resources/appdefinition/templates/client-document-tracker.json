@@ -1,0 +1,124 @@
+{
+  "schemaVersion": 1,
+  "template": "client-document-tracker",
+  "name": "Client Document Tracker",
+  "currency": "USD",
+  "timezone": "America/New_York",
+  "partyTypes": [
+    {
+      "id": "client",
+      "label": "Client",
+      "archived": false,
+      "fields": [
+        { "id": "name", "label": "Full Name", "type": "text", "required": true },
+        { "id": "email", "label": "Email Address", "type": "email", "required": true },
+        { "id": "company", "label": "Company Name", "type": "text", "required": false }
+      ]
+    }
+  ],
+  "documentChecklists": [
+    {
+      "id": "onboarding_docs",
+      "label": "Onboarding Documents",
+      "partyType": "client",
+      "archived": false,
+      "items": [
+        { "id": "gov_id", "label": "Government Photo ID", "required": true, "dueOffsetDays": 7, "expiryDays": 365, "archived": false },
+        { "id": "tax_form", "label": "Tax Identification Form (W-9 / W-8)", "required": true, "dueOffsetDays": 7, "archived": false },
+        { "id": "proof_of_address", "label": "Proof of Address", "required": false, "dueOffsetDays": 14, "archived": false }
+      ]
+    }
+  ],
+  "reminderRules": [
+    {
+      "id": "doc_due_before_7",
+      "label": "Document Due Reminder (7 Days Before)",
+      "partyType": "client",
+      "trigger": "document.due",
+      "offsetDays": -7,
+      "recipient": "party",
+      "messageKey": "doc_reminder_before",
+      "channel": "email",
+      "enabled": true,
+      "archived": false
+    },
+    {
+      "id": "doc_due_before_3",
+      "label": "Document Due Reminder (3 Days Before)",
+      "partyType": "client",
+      "trigger": "document.due",
+      "offsetDays": -3,
+      "recipient": "party",
+      "messageKey": "doc_reminder_before",
+      "channel": "email",
+      "enabled": true,
+      "archived": false
+    },
+    {
+      "id": "doc_due_today",
+      "label": "Document Due Reminder (Today)",
+      "partyType": "client",
+      "trigger": "document.due",
+      "offsetDays": 0,
+      "recipient": "party",
+      "messageKey": "doc_reminder_due",
+      "channel": "email",
+      "enabled": true,
+      "archived": false
+    },
+    {
+      "id": "doc_due_late_3",
+      "label": "Document Due Reminder (3 Days Late)",
+      "partyType": "client",
+      "trigger": "document.due",
+      "offsetDays": 3,
+      "recipient": "party",
+      "messageKey": "doc_reminder_late",
+      "channel": "email",
+      "enabled": true,
+      "archived": false
+    },
+    {
+      "id": "doc_expiry_30",
+      "label": "Document Expiry Reminder (30 Days Before)",
+      "partyType": "client",
+      "trigger": "document.expiry",
+      "offsetDays": -30,
+      "recipient": "party",
+      "messageKey": "doc_expiry_reminder",
+      "channel": "email",
+      "enabled": true,
+      "archived": false
+    },
+    {
+      "id": "doc_expiry_7",
+      "label": "Document Expiry Reminder (7 Days Before)",
+      "partyType": "client",
+      "trigger": "document.expiry",
+      "offsetDays": -7,
+      "recipient": "party",
+      "messageKey": "doc_expiry_reminder",
+      "channel": "email",
+      "enabled": true,
+      "archived": false
+    },
+    {
+      "id": "doc_overdue_owner_7",
+      "label": "Overdue Documents Alert (7 Days)",
+      "partyType": "client",
+      "trigger": "document.due",
+      "offsetDays": 7,
+      "recipient": "owner",
+      "messageKey": "doc_overdue_owner",
+      "channel": "email",
+      "enabled": true,
+      "archived": false
+    }
+  ],
+  "widgets": [
+    { "id": "count_overdue_docs", "type": "count_overdue_docs", "partyType": "client", "archived": false },
+    { "id": "list_missing_docs", "type": "list_missing_docs", "partyType": "client", "archived": false },
+    { "id": "list_expiring_docs", "type": "list_expiring_docs", "partyType": "client", "archived": false },
+    { "id": "completion_pct_by_party", "type": "completion_pct_by_party", "partyType": "client", "archived": false }
+  ]
+}

@@ -1,0 +1,152 @@
+{
+  "schemaVersion": 1,
+  "template": "rental-property-manager",
+  "name": "Rental Property Manager",
+  "currency": "USD",
+  "timezone": "America/New_York",
+  "partyTypes": [
+    {
+      "id": "tenant",
+      "label": "Tenant",
+      "archived": false,
+      "fields": [
+        { "id": "name", "label": "Full Name", "type": "text", "required": true },
+        { "id": "email", "label": "Email Address", "type": "email", "required": true },
+        { "id": "phone", "label": "Phone Number", "type": "phone", "required": false },
+        { "id": "monthly_rent", "label": "Monthly Rent", "type": "money", "required": true },
+        { "id": "due_day", "label": "Rent Due Day", "type": "integer", "required": true },
+        { "id": "lease_start", "label": "Lease Start Date", "type": "date", "required": true },
+        { "id": "lease_end", "label": "Lease End Date", "type": "date", "required": true },
+        { "id": "unit", "label": "Unit", "type": "record_ref", "target": "unit", "required": false }
+      ]
+    }
+  ],
+  "recordTypes": [
+    {
+      "id": "unit",
+      "label": "Unit",
+      "archived": false,
+      "fields": [
+        { "id": "address", "label": "Address", "type": "text", "required": true },
+        { "id": "default_rent", "label": "Default Rent", "type": "money", "required": false },
+        {
+          "id": "status",
+          "label": "Status",
+          "type": "select",
+          "required": true,
+          "options": [
+            { "id": "occupied", "label": "Occupied", "archived": false },
+            { "id": "vacant", "label": "Vacant", "archived": false }
+          ]
+        }
+      ]
+    }
+  ],
+  "chargeSchedules": [
+    {
+      "id": "monthly_rent",
+      "label": "Monthly Rent",
+      "kind": "recurring",
+      "partyType": "tenant",
+      "amountSource": "field",
+      "amountField": "monthly_rent",
+      "dueDaySource": "field",
+      "dueDayField": "due_day",
+      "enabled": true,
+      "archived": false
+    },
+    {
+      "id": "late_fee",
+      "label": "Late Fee",
+      "kind": "late_fee",
+      "partyType": "tenant",
+      "amountSource": "fixed",
+      "amountCents": 5000,
+      "graceDays": 5,
+      "enabled": false,
+      "archived": false
+    }
+  ],
+  "reminderRules": [
+    {
+      "id": "rent_reminder_before_3",
+      "label": "Rent Reminder (3 Days Before)",
+      "partyType": "tenant",
+      "trigger": "charge.due",
+      "offsetDays": -3,
+      "recipient": "party",
+      "messageKey": "charge_reminder_before",
+      "channel": "email",
+      "enabled": true,
+      "archived": false
+    },
+    {
+      "id": "rent_reminder_due",
+      "label": "Rent Reminder (Due Day)",
+      "partyType": "tenant",
+      "trigger": "charge.due",
+      "offsetDays": 0,
+      "recipient": "party",
+      "messageKey": "charge_reminder_due",
+      "channel": "email",
+      "enabled": true,
+      "archived": false
+    },
+    {
+      "id": "rent_reminder_late_3",
+      "label": "Rent Reminder (3 Days Late)",
+      "partyType": "tenant",
+      "trigger": "charge.due",
+      "offsetDays": 3,
+      "recipient": "party",
+      "messageKey": "charge_reminder_late",
+      "channel": "email",
+      "enabled": true,
+      "archived": false
+    },
+    {
+      "id": "rent_reminder_late_7",
+      "label": "Rent Reminder (7 Days Late)",
+      "partyType": "tenant",
+      "trigger": "charge.due",
+      "offsetDays": 7,
+      "recipient": "party",
+      "messageKey": "charge_reminder_late",
+      "channel": "email",
+      "enabled": true,
+      "archived": false
+    },
+    {
+      "id": "rent_overdue_owner_7",
+      "label": "Overdue Rent Alert (7 Days)",
+      "partyType": "tenant",
+      "trigger": "charge.overdue",
+      "offsetDays": 7,
+      "recipient": "owner",
+      "messageKey": "charge_overdue_owner",
+      "channel": "email",
+      "enabled": true,
+      "archived": false
+    },
+    {
+      "id": "lease_ending_owner_60",
+      "label": "Lease Ending Alert (60 Days Before)",
+      "partyType": "tenant",
+      "trigger": "lease.end",
+      "offsetDays": -60,
+      "recipient": "owner",
+      "messageKey": "lease_ending_owner",
+      "channel": "email",
+      "dateField": "lease_end",
+      "enabled": true,
+      "archived": false
+    }
+  ],
+  "widgets": [
+    { "id": "sum_expected", "type": "sum_expected_period", "partyType": "tenant", "archived": false },
+    { "id": "sum_collected", "type": "sum_collected_period", "partyType": "tenant", "archived": false },
+    { "id": "count_overdue", "type": "count_overdue_charges", "partyType": "tenant", "archived": false },
+    { "id": "list_overdue", "type": "list_overdue_parties", "partyType": "tenant", "archived": false },
+    { "id": "expiring_leases", "type": "list_expiring_leases", "partyType": "tenant", "dateField": "lease_end", "archived": false }
+  ]
+}

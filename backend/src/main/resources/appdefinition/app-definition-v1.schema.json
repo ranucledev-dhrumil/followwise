@@ -1,0 +1,427 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://followwise.com/schemas/app-definition-v1.json",
+  "title": "FollowWise App Definition v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "template",
+    "name",
+    "currency",
+    "timezone",
+    "partyTypes"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "integer",
+      "const": 1
+    },
+    "template": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_-]{1,40}$"
+    },
+    "name": {
+      "$ref": "#/$defs/label"
+    },
+    "currency": {
+      "type": "string",
+      "const": "USD"
+    },
+    "timezone": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 100
+    },
+    "partyTypes": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 5,
+      "items": {
+        "$ref": "#/$defs/partyType"
+      }
+    },
+    "recordTypes": {
+      "type": "array",
+      "maxItems": 5,
+      "items": {
+        "$ref": "#/$defs/recordType"
+      }
+    },
+    "chargeSchedules": {
+      "type": "array",
+      "maxItems": 10,
+      "items": {
+        "$ref": "#/$defs/chargeSchedule"
+      }
+    },
+    "documentChecklists": {
+      "type": "array",
+      "maxItems": 5,
+      "items": {
+        "$ref": "#/$defs/documentChecklist"
+      }
+    },
+    "reminderRules": {
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "$ref": "#/$defs/reminderRule"
+      }
+    },
+    "widgets": {
+      "type": "array",
+      "maxItems": 10,
+      "items": {
+        "$ref": "#/$defs/widget"
+      }
+    }
+  },
+  "$defs": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{1,40}$"
+    },
+    "label": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120,
+      "pattern": "^[^<>\\u0000-\\u001F\\u007F]+$"
+    },
+    "fieldType": {
+      "type": "string",
+      "enum": [
+        "text",
+        "email",
+        "phone",
+        "date",
+        "integer",
+        "money",
+        "boolean",
+        "select",
+        "party_ref",
+        "record_ref"
+      ]
+    },
+    "selectOption": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "label"],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "label": {
+          "$ref": "#/$defs/label"
+        },
+        "archived": {
+          "type": "boolean"
+        }
+      }
+    },
+    "field": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "label", "type", "required"],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "label": {
+          "$ref": "#/$defs/label"
+        },
+        "type": {
+          "$ref": "#/$defs/fieldType"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "archived": {
+          "type": "boolean"
+        },
+        "options": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "$ref": "#/$defs/selectOption"
+          }
+        },
+        "target": {
+          "$ref": "#/$defs/id"
+        }
+      }
+    },
+    "partyType": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "label", "fields"],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "label": {
+          "$ref": "#/$defs/label"
+        },
+        "archived": {
+          "type": "boolean"
+        },
+        "fields": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 30,
+          "items": {
+            "$ref": "#/$defs/field"
+          }
+        }
+      }
+    },
+    "recordType": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "label", "fields"],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "label": {
+          "$ref": "#/$defs/label"
+        },
+        "archived": {
+          "type": "boolean"
+        },
+        "fields": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 30,
+          "items": {
+            "$ref": "#/$defs/field"
+          }
+        }
+      }
+    },
+    "chargeSchedule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "label",
+        "kind",
+        "partyType",
+        "amountSource",
+        "enabled"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "label": {
+          "$ref": "#/$defs/label"
+        },
+        "kind": {
+          "type": "string",
+          "enum": ["recurring", "late_fee"]
+        },
+        "partyType": {
+          "$ref": "#/$defs/id"
+        },
+        "amountSource": {
+          "type": "string",
+          "enum": ["field", "fixed"]
+        },
+        "amountField": {
+          "$ref": "#/$defs/id"
+        },
+        "amountCents": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "dueDaySource": {
+          "type": "string",
+          "enum": ["field", "fixed"]
+        },
+        "dueDayField": {
+          "$ref": "#/$defs/id"
+        },
+        "dueDay": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 28
+        },
+        "graceDays": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 60
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "archived": {
+          "type": "boolean"
+        }
+      }
+    },
+    "documentItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "label", "required"],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "label": {
+          "$ref": "#/$defs/label"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "archived": {
+          "type": "boolean"
+        },
+        "dueOffsetDays": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 365
+        },
+        "expiryDays": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3650
+        }
+      }
+    },
+    "documentChecklist": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "label", "partyType", "items"],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "label": {
+          "$ref": "#/$defs/label"
+        },
+        "partyType": {
+          "$ref": "#/$defs/id"
+        },
+        "archived": {
+          "type": "boolean"
+        },
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 20,
+          "items": {
+            "$ref": "#/$defs/documentItem"
+          }
+        }
+      }
+    },
+    "reminderRule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "label",
+        "partyType",
+        "trigger",
+        "offsetDays",
+        "recipient",
+        "messageKey",
+        "channel",
+        "enabled"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "label": {
+          "$ref": "#/$defs/label"
+        },
+        "partyType": {
+          "$ref": "#/$defs/id"
+        },
+        "trigger": {
+          "type": "string",
+          "enum": [
+            "charge.due",
+            "charge.overdue",
+            "document.due",
+            "document.expiry",
+            "lease.end"
+          ]
+        },
+        "offsetDays": {
+          "type": "integer",
+          "minimum": -365,
+          "maximum": 365
+        },
+        "recipient": {
+          "type": "string",
+          "enum": ["party", "owner"]
+        },
+        "messageKey": {
+          "type": "string",
+          "enum": [
+            "charge_reminder_before",
+            "charge_reminder_due",
+            "charge_reminder_late",
+            "charge_overdue_owner",
+            "doc_reminder_before",
+            "doc_reminder_due",
+            "doc_reminder_late",
+            "doc_expiry_reminder",
+            "doc_overdue_owner",
+            "lease_ending_owner"
+          ]
+        },
+        "channel": {
+          "type": "string",
+          "enum": ["email"]
+        },
+        "dateField": {
+          "$ref": "#/$defs/id"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "archived": {
+          "type": "boolean"
+        }
+      }
+    },
+    "widget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type"],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "count_overdue_charges",
+            "sum_overdue_charges",
+            "count_overdue_docs",
+            "sum_expected_period",
+            "sum_collected_period",
+            "list_overdue_parties",
+            "list_expiring_leases",
+            "list_missing_docs",
+            "list_expiring_docs",
+            "completion_pct_by_party"
+          ]
+        },
+        "partyType": {
+          "$ref": "#/$defs/id"
+        },
+        "dateField": {
+          "$ref": "#/$defs/id"
+        },
+        "archived": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}

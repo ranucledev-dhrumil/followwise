@@ -1,8 +1,8 @@
 # PLAN-0007: App Definition schema and validator
 
-Status: APPROVED
+Status: DONE
 Phase / step: Phase 1, step 1a
-Author: Claude (planner)   Executor: (model that executed)
+Author: Claude (planner)   Executor: Gemini 3.8 Flash
 Branch: plan-0007
 
 ## Goal
@@ -123,12 +123,12 @@ Run `cd backend && mvn test` after each slice. All 45 existing tests must still 
 - Registry with one fixture template containing an unknown property → throws `IllegalStateException`
 
 ## Acceptance criteria
-- [ ] `mvn test` green (45 + new tests)
-- [ ] Both template JSON files validate against `app-definition-v1.schema.json`
-- [ ] Startup fails with an invalid template fixture
-- [ ] No ValidationError contains a stack trace or raw input echo
-- [ ] D-61 to D-65 appended to README 14.1 verbatim
-- [ ] STATUS.md Phase 1 steps checklist present, 1a ticked
+- [x] `mvn test` green (45 + new tests)
+- [x] Both template JSON files validate against `app-definition-v1.schema.json`
+- [x] Startup fails with an invalid template fixture
+- [x] No ValidationError contains a stack trace or raw input echo
+- [x] D-61 to D-65 appended to README 14.1 verbatim
+- [x] STATUS.md Phase 1 steps checklist present, 1a ticked
 
 ## Risks and assumptions
 1. `json-schema-validator` 3.0.8 is the current latest 3.x; executor must confirm version on Maven Central before adding.
@@ -201,14 +201,68 @@ D-66 Definition shapes and binding rules (v1): chargeSchedule kind is recurring 
 
 ---
 ## Execution report (executor fills)
-Date:
-Executor model:
-Deviations from plan:
-Exact dependency versions used:
-Slice 1 check result:
-Slice 2 check result:
-Slice 3 check result:
-Slice 4 check result:
-Slice 5 check result:
-Slice 6 check result:
-Test counts (existing + new):
+Date: 2026-11-04
+Executor model: Gemini 3.8 Flash
+Deviations from plan: Per Jackson 3 API changes, configured StreamReadFeature.STRICT_DUPLICATE_DETECTION and StreamReadConstraints on JsonFactory.builder(), and instantiated NetworkNT 3.0.8 using SchemaRegistry.withDefaultDialect(SpecificationVersion.DRAFT_2020_12).
+Exact dependency versions used: com.networknt:json-schema-validator:3.0.8, tools.jackson.core:jackson-databind:3.1.5
+Files changed by slice:
+- Slice 1: backend/pom.xml, backend/src/main/resources/appdefinition/app-definition-v1.schema.json
+- Slice 2: backend/src/main/java/com/followwise/appdef/ValidationError.java, backend/src/main/java/com/followwise/appdef/SemanticValidator.java, backend/src/main/java/com/followwise/appdef/AppDefinitionValidator.java, backend/src/test/java/com/followwise/appdef/AppDefinitionValidatorTest.java
+- Slice 3: backend/src/main/java/com/followwise/appdef/TransitionValidator.java, backend/src/test/java/com/followwise/appdef/TransitionValidatorTest.java
+- Slice 4: backend/src/main/resources/appdefinition/templates/rental-property-manager.json, backend/src/main/resources/appdefinition/templates/client-document-tracker.json, backend/src/test/java/com/followwise/appdef/AppDefinitionValidatorTest.java
+- Slice 5: backend/src/main/java/com/followwise/appdef/TemplateRegistry.java, backend/src/test/java/com/followwise/appdef/TemplateRegistryTest.java, backend/src/test/resources/fixtures/invalid-templates/invalid-property.json, backend/src/test/resources/fixtures/mismatched-templates/mismatched.json
+- Slice 6: schemas/README.md, README.md, docs/STATUS.md, docs/plans/PLAN-0007-app-definition-schema.md
+Slice 1 check result: PASS (mvn test, 45 tests passed)
+Slice 2 check result: PASS (mvn test, 59 tests passed)
+Slice 3 check result: PASS (mvn test, 73 tests passed)
+Slice 4 check result: PASS (mvn test, 74 tests passed)
+Slice 5 check result: PASS (mvn test, 78 tests passed)
+Slice 6 check result: PASS (grep -n "D-65" README.md passed)
+Test counts (existing + new): 45 existing + 33 new = 78 total (15 AppDefinitionValidatorTest + 14 TransitionValidatorTest + 4 TemplateRegistryTest).
+
+
+## Orchestrator addendum 1 (binding). Scope: tests and small fixes only, no new features.
+1. Timezone: require ZoneId.getAvailableZoneIds().contains(tz) in SemanticValidator and TransitionValidator. ZoneId.of also accepts offsets like "+05:00" and "UTC+5", which are not IANA region ids.
+2. Parse failures (malformed JSON, duplicate key, nesting too deep, oversized) map to fixed messages. e.getMessage() may only choose the category and must never be copied into a ValidationError.
+3. Implement any of these rules that are missing, and test each one:
+ a. A top-level unknown key is rejected with its pointer (for example /invoices).
+ b. Amendment F table: wrong trigger for a messageKey, wrong recipient, wrong offset sign or range.
+ c. Invalid timezone (unknown region, "+05:00", "UTC+5") and non-USD currency.
+ d. Charge widgets need a chargeSchedule; document widgets need a documentChecklist; list_expiring_leases needs a dateField that is a date-type field of its partyType; dateField on any other widget is rejected.
+ e. A lease.end reminder needs a dateField that is a date-type field of the same partyType; dateField on other triggers is rejected.
+ f. chargeSchedule: recurring needs dueDaySource with dueDay 1-28 or an integer dueDayField and forbids graceDays; late_fee needs graceDays 0-60 and forbids dueDay fields; amountField must be money; partyType must exist.
+ g. Dangling references are rejected: party_ref and record_ref targets, and the partyType of reminder rules, charge schedules, and checklists.
+ h. Count limits (one parameterized test): party types 5, charge schedules 10, reminder rules 20, widgets 10, select options 50, document items 20. The limit passes; limit+1 is rejected.
+ i. Malformed JSON that contains the marker text SECRET_MARKER_123: the marker appears nowhere in the errors, and the message is fixed text.
+4. Add the tests with clear names. Do not remove or weaken any existing test.
+5. Report: new test names, which rules were missing and added, and the final test counts.
+
+## Execution report addendum 1
+Date: 2026-11-04
+Executor model: Gemini 3.8 Flash
+Rules that were missing and added:
+- Timezone validation updated in SemanticValidator and TransitionValidator to require `ZoneId.getAvailableZoneIds().contains(tz)`, rejecting non-region offset IDs like `+05:00` and `UTC+5`.
+- Top-level unknown property reporting updated in AppDefinitionValidator to append `err.getProperty()` (e.g. `/invoices`), correctly pointing to the offending key.
+- dateField forbidden on non-lease.end reminder rules added to SemanticValidator.
+- dateField forbidden on non-list_expiring_leases widgets added to SemanticValidator.
+- chargeSchedule recurring vs late_fee constraints enforced in SemanticValidator: recurring forbids graceDays and enforces dueDaySource with dueDay 1-28 / dueDayField; late_fee enforces graceDays 0-60 and forbids dueDaySource/dueDay/dueDayField.
+New test names:
+- AppDefinitionValidatorTest.topLevelUnknownKey_rejectedWithPointer
+- AppDefinitionValidatorTest.amendmentFMessageKeyTable_violationsRejected
+- AppDefinitionValidatorTest.invalidTimezoneAndCurrency_rejected
+- AppDefinitionValidatorTest.widgetDataDependenciesAndDateField_validated
+- AppDefinitionValidatorTest.reminderRuleDateField_validated
+- AppDefinitionValidatorTest.chargeScheduleRecurringAndLateFeeRules_validated
+- AppDefinitionValidatorTest.danglingReferences_rejected
+- AppDefinitionValidatorTest.countLimits_limitPassesAndLimitPlusOneRejected (parameterized across 6 categories)
+- AppDefinitionValidatorTest.malformedJson_secretMarkerNotLeaked
+- TransitionValidatorTest.changingTimezone_offsetsRejected
+Files changed:
+- backend/src/main/java/com/followwise/appdef/AppDefinitionValidator.java
+- backend/src/main/java/com/followwise/appdef/SemanticValidator.java
+- backend/src/main/java/com/followwise/appdef/TransitionValidator.java
+- backend/src/test/java/com/followwise/appdef/AppDefinitionValidatorTest.java
+- backend/src/test/java/com/followwise/appdef/TransitionValidatorTest.java
+- docs/plans/PLAN-0007-app-definition-schema.md
+Final test counts:
+- 93 total tests passing (45 existing pre-plan + 48 appdef tests: 29 AppDefinitionValidatorTest + 15 TransitionValidatorTest + 4 TemplateRegistryTest).
