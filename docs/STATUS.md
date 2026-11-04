@@ -52,12 +52,12 @@ Last updated: 2026-11-04 by Gemini 3.8 Flash (PLAN-0008)
 - [x] Render account and service (free, Docker, root `backend/`)
 - [x] Vercel account and project (Hobby, root `frontend/`)
 - [x] Email: Brevo SMTP relay on port 2525 (Render free blocks 25/465/587); sender verified; first real email SENT
-- [ ] Revoke the old Gmail app password (no longer used; it was exposed in a shared archive on 2026-11-03)
-- [ ] Rotate JWT_SECRET (local, and on Render if the same value is used)
+- [x] Revoke the old Gmail app password (no longer used; it was exposed in a shared archive on 2026-11-03)
+- [x] Rotate JWT_SECRET (local, and on Render if the same value is used)
 - [x] Public repo `followwise-keepalive` created with the ping workflow
-- [ ] Keep-alive: confirm a manual run shows HTTP 200 after the backend is awake (first run timed out on a cold start)
-- [ ] Store all secrets in a password manager (never in the repo or in shared archives)
-- [ ] Open the repo in Antigravity; confirm it reads `AGENTS.md`
+- [x] Keep-alive: confirm a manual run shows HTTP 200 after the backend is awake (first run timed out on a cold start)
+- [x] Store all secrets in a password manager (never in the repo or in shared archives)
+- [x] Open the repo in Antigravity; confirm it reads `AGENTS.md`
 
 ## Acceptance checklist (PLAN-0006), fill in pass or fail
 | # | Check | Result |
