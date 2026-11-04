@@ -1,8 +1,8 @@
 # PLAN-0008: Apps and definition versions API
 
-Status: APPROVED
+Status: DONE
 Phase / step: Phase 1, step 1b
-Author: Claude (Gemini 2.5 Pro via Antigravity)   Executor:
+Author: Claude (Gemini 2.5 Pro via Antigravity)   Executor: Gemini 3.8 Flash
 Branch: plan-0008 (created by the founder; AI models run no git)
 
 ## Goal
@@ -236,7 +236,69 @@ D-73 Endpoints that accept a definition read the raw body with the strict parser
 ---
 ## Execution report (executor fills)
 - What was done:
+  - Slice 1: Flyway migration V5__apps.sql for apps and app_definition_versions with ON DELETE CASCADE and CHECK constraints.
+  - Slice 2: Records (AppRecord, AppDefinitionVersionRecord, AppVersionSummaryRecord) and AppStore using Spring JdbcClient with explicit SQL.
+  - Slice 3: Added VIEW_APP and MANAGE_APPS to Permission.java, configured limits in application.properties and .env.example, created BodySizeFilter for 80 KB payload limiting.
+  - Slice 4: Implemented AppService with atomic template copying, workspace lock with FOR UPDATE, limit checks, strict validation, transition checks, optimistic locking, and archive logic.
+  - Slice 5: Implemented TemplateController (GET /api/templates, GET /api/templates/{key}) and AppController (all 7 workspace endpoints).
+  - Slice 6: Implemented AppExceptionHandler mapping exceptions to RFC 9457 ProblemDetail with specific 409 conflict types.
+  - Slice 7: Implemented AppApiTest with 18 comprehensive integration tests verifying all 28 acceptance criteria.
+  - Slice 8: Appended decisions D-67 to D-73 to README.md section 14.1, updated docs/STATUS.md.
 - Files changed (grouped by slice):
+  - Slice 1: backend/src/main/resources/db/migration/V5__apps.sql
+  - Slice 2: backend/src/main/java/com/followwise/app/AppRecord.java, backend/src/main/java/com/followwise/app/AppDefinitionVersionRecord.java, backend/src/main/java/com/followwise/app/AppVersionSummaryRecord.java, backend/src/main/java/com/followwise/app/AppStore.java
+  - Slice 3: backend/src/main/java/com/followwise/workspace/Permission.java, backend/src/main/resources/application.properties, .env.example, backend/src/main/java/com/followwise/app/BodySizeFilter.java, backend/src/main/java/com/followwise/app/MaxPayloadSizeExceededException.java
+  - Slice 4: backend/src/main/java/com/followwise/app/AppPayloadParser.java, backend/src/main/java/com/followwise/app/AppService.java, backend/src/main/java/com/followwise/app/AppConflictException.java, backend/src/main/java/com/followwise/app/AppValidationException.java, backend/src/main/java/com/followwise/app/AppNotFoundException.java, backend/src/main/java/com/followwise/app/AppBadRequestException.java, backend/src/main/java/com/followwise/app/AppSummaryResponse.java, backend/src/main/java/com/followwise/app/AppResponse.java, backend/src/main/java/com/followwise/app/AppVersionSummaryResponse.java, backend/src/main/java/com/followwise/app/AppVersionResponse.java, backend/src/main/java/com/followwise/app/TemplateSummaryResponse.java
+  - Slice 5: backend/src/main/java/com/followwise/app/TemplateController.java, backend/src/main/java/com/followwise/app/AppController.java
+  - Slice 6: backend/src/main/java/com/followwise/app/AppExceptionHandler.java
+  - Slice 7: backend/src/test/java/com/followwise/app/AppApiTest.java
+  - Slice 8: README.md, docs/STATUS.md, docs/plans/PLAN-0008-apps-and-definition-versions-api.md
 - Commands run and results (no git commands):
+  - cd backend; mvn test -> 111 tests run, 0 failures, 0 errors, 0 skipped.
 - Deviations from the plan:
+  - Followed Orchestrator Amendments B-L (used JdbcClient instead of JPA entities; added strict duplicate key and nesting depth validation via AppPayloadParser; added ON DELETE CASCADE on V5 foreign keys).
 - Follow-ups or new risks:
+  - None. Exact dependency versions: unchanged (Spring Boot 4.1.1, testcontainers 2.0.5, json-schema-validator 3.0.8). Existing test count: 93, new tests: 18, final total: 111.
+
+## Orchestrator addendum 1 (binding). Tests and small fixes only, no new features.
+1. V5__apps.sql: remove every ON DELETE CASCADE (use the default RESTRICT). V5 is not merged or deployed, so edit it in place. Report this as a deviation in the report. (The founder resets the local database volume.)
+2. Check backend/src/main/java/com/followwise/app/AppStore.java around line 64. If the SQL contains "archived_atIS NULL" (missing space), fix it and add a test that exercises the active-app count. If it is already correct, say so.
+3. Confirm and show in the report (file and line): maxNestingDepth is set on the strict parser; the create and PUT endpoints read the raw body bytes (not Spring's default JSON binding).
+4. Add each of these tests only if it does not already exist by behavior; for each one say "existing: <test name>" or "added: <test name>":
+ a. PUT definition on an archived app returns 409 with type app_archived.
+ b. A definition nested deeper than the limit is rejected through the PUT endpoint with fixed-text problem+json.
+ c. Every error response type (400, 403, 404, 409 x4, 413, 422) contains no stack trace text, no "Exception", and no marker string that was sent in the request (use SECRET_MARKER_123 in a label, the name, and the note).
+ d. Archived apps are excluded from the list by default and included with ?archived=true.
+ e. GET of an archived app still works for OWNER and STAFF.
+ f. A note longer than 500 characters, an invalid timezone on create, an unknown envelope key, and an unknown template key are each rejected with the right status (one parameterized test is fine).
+5. Do not weaken or remove any existing test.
+6. Add "Execution report addendum 1" to the plan file: deviations, the existing-or-added list, files changed, final test counts.
+
+---
+## Execution report addendum 1 (executor fills)
+- Deviations:
+  - Removed ON DELETE CASCADE on all foreign keys in `V5__apps.sql` (using default RESTRICT).
+- Checks & Confirmations:
+  - `AppStore.java` line 64: verified already correct with proper spacing (`archived_at IS NULL`). Added test `appStore_countActiveApps_exercisesSqlAndFiltering`.
+  - `maxNestingDepth(20)`: set on strict parser in `AppPayloadParser.java` line 39.
+  - Raw body bytes: `createApp` (`AppController.java` line 26) and `putDefinition` (`AppController.java` line 76) both read `@RequestBody byte[] rawBody` directly.
+  - Sanitization: updated error messages to never echo input parameters or keys (e.g. unknown property, template key).
+- Existing-or-added list:
+  - 4a: existing: `activeAppLimit_and_slotReuseAfterArchive_and_totalAppLimit`; added: `putDefinition_onArchivedApp_returns409_app_archived`
+  - 4b: added: `putDefinition_nestedDeeperThanLimit_rejectedWithFixedTextProblemJson`
+  - 4c: added: `everyErrorResponseType_containsNoStackTrace_noException_andNoEchoedMarker`
+  - 4d: added: `archivedApps_excludedFromListByDefault_andIncludedWithQueryParam`
+  - 4e: added: `getArchivedApp_worksForOwnerAndStaff`
+  - 4f: existing: `invalidEnvelope_and_badInputs_rejected`; added: `rejectedInputs_eachReturnsExpectedStatus`
+  - Item 2: added: `appStore_countActiveApps_exercisesSqlAndFiltering`
+- Files changed:
+  - `backend/src/main/resources/db/migration/V5__apps.sql`
+  - `backend/src/main/java/com/followwise/app/AppPayloadParser.java`
+  - `backend/src/main/java/com/followwise/app/AppService.java`
+  - `backend/src/main/java/com/followwise/app/TemplateController.java`
+  - `backend/src/test/java/com/followwise/app/AppApiTest.java`
+  - `docs/plans/PLAN-0008-apps-and-definition-versions-api.md`
+- Final test counts:
+  - Existing baseline tests: 93
+  - Plan 0008 tests: 25 in `AppApiTest` (18 original + 7 added in Addendum 1)
+  - Final total: 118 tests run, 0 failures, 0 errors, 0 skipped.
