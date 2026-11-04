@@ -83,6 +83,8 @@ class AppApiTest extends AbstractIntegrationTest {
 
     @BeforeEach
     void setUp() {
+        jdbcClient.sql("DELETE FROM parties").update();
+        jdbcClient.sql("DELETE FROM records").update();
         jdbcClient.sql("DELETE FROM app_definition_versions").update();
         jdbcClient.sql("DELETE FROM apps").update();
         membershipRepository.deleteAll();

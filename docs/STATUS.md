@@ -1,16 +1,16 @@
 # STATUS (single status log)
 
 Update this file at the end of every task. It is the first thing every model and the founder reads.
-Last updated: 2026-11-04 by Gemini 3.8 Flash (PLAN-0008)
+Last updated: 2026-11-04 by Gemini 3.8 Flash (PLAN-0009)
 
 ## Current
 | Item | Value |
 |---|---|
 | Product version | **0.1.0 pending** (Phase 0 built; tag v0.1.0 to be re-created on the final main commit after acceptance) |
-| Docs baseline | README v1.2 (decision log D-01 to D-73) |
+| Docs baseline | README v1.2 (decision log D-01 to D-79) |
 | Current phase | **Phase 1: Engine core** |
-| Current step | Phase 1, step 1c |
-| Next task | PLAN-0009: Parties and records with custom fields (Phase 1, step 1c) |
+| Current step | Phase 1, step 1d |
+| Next task | PLAN-0010: charges and ledger (Phase 1, step 1d) |
 
 ## Version scheme
 - 0.x while building: 0.1.0 = Phase 0 done, 0.2.0 = Phase 1 done, 0.3.0 = Phase 2 done.
@@ -40,7 +40,7 @@ Last updated: 2026-11-04 by Gemini 3.8 Flash (PLAN-0008)
 ## Phase 1 steps
 - [x] 1a. App Definition schema and validator (PLAN-0007)
 - [x] 1b. Apps and definition versions API (PLAN-0008)
-- [ ] 1c. Parties and records with custom fields
+- [x] 1c. Parties and records with custom fields (PLAN-0009)
 - [ ] 1d. Charges and ledger
 - [ ] 1e. Documents and storage
 - [ ] 1f. Reminder engine
@@ -81,6 +81,7 @@ Last updated: 2026-11-04 by Gemini 3.8 Flash (PLAN-0008)
 ## Task log
 | Date | Task | Done by | Result |
 |---|---|---|---|
+| 2026-11-04 | PLAN-0009: parties and records (Phase 1, step 1c) | Gemini 3.8 Flash | Done |
 | 2026-11-04 | PLAN-0008: apps and definition versions API (Phase 1, step 1b) | Gemini 3.8 Flash | Done |
 | 2026-11-04 | PLAN-0007: App Definition schema and validator (Phase 1, step 1a) | Gemini 3.8 Flash | Done |
 | 2026-11-03 | Repo review before Phase 1: no secrets in git history; found .env in shared archive (rotate), v0.1.0 tag on wrong commit, last commit message mislabeled, docs missing Brevo (D-60), STATUS stale | Orchestrator | Done |

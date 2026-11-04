@@ -23,6 +23,7 @@ import java.nio.charset.StandardCharsets;
 public class BodySizeFilter extends OncePerRequestFilter {
 
     public static final int MAX_SIZE = 81920;
+    public static final int DATA_MAX_SIZE = 32768;
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
@@ -30,27 +31,37 @@ public class BodySizeFilter extends OncePerRequestFilter {
         String uri = request.getRequestURI();
         String method = request.getMethod();
 
-        boolean isTarget = (method.equalsIgnoreCase("POST") && uri.matches("^/api/workspaces/[^/]+/apps/?$"))
+        int limit = 0;
+        boolean isAppTarget = (method.equalsIgnoreCase("POST") && uri.matches("^/api/workspaces/[^/]+/apps/?$"))
                 || (method.equalsIgnoreCase("PUT") && uri.matches("^/api/workspaces/[^/]+/apps/[^/]+/definition/?$"));
 
-        if (!isTarget) {
+        boolean isDataTarget = (method.equalsIgnoreCase("POST") && uri.matches("^/api/workspaces/[^/]+/apps/[^/]+/parties/?$"))
+                || (method.equalsIgnoreCase("PUT") && uri.matches("^/api/workspaces/[^/]+/apps/[^/]+/parties/[^/]+/?$"))
+                || (method.equalsIgnoreCase("POST") && uri.matches("^/api/workspaces/[^/]+/apps/[^/]+/records/?$"))
+                || (method.equalsIgnoreCase("PUT") && uri.matches("^/api/workspaces/[^/]+/apps/[^/]+/records/[^/]+/?$"));
+
+        if (isAppTarget) {
+            limit = MAX_SIZE;
+        } else if (isDataTarget) {
+            limit = DATA_MAX_SIZE;
+        } else {
             filterChain.doFilter(request, response);
             return;
         }
 
         long contentLength = request.getContentLengthLong();
-        if (contentLength > MAX_SIZE) {
-            write413(response);
+        if (contentLength > limit) {
+            write413(response, limit);
             return;
         }
 
-        BoundedSizeRequestWrapper wrappedRequest = new BoundedSizeRequestWrapper(request, MAX_SIZE);
+        BoundedSizeRequestWrapper wrappedRequest = new BoundedSizeRequestWrapper(request, limit);
         try {
             filterChain.doFilter(wrappedRequest, response);
         } catch (Exception e) {
             if (isPayloadSizeExceeded(e)) {
                 if (!response.isCommitted()) {
-                    write413(response);
+                    write413(response, limit);
                 }
             } else {
                 throw e;
@@ -69,10 +80,14 @@ public class BodySizeFilter extends OncePerRequestFilter {
     }
 
     public static void write413(HttpServletResponse response) throws IOException {
+        write413(response, MAX_SIZE);
+    }
+
+    public static void write413(HttpServletResponse response, int limit) throws IOException {
         response.setStatus(HttpStatus.PAYLOAD_TOO_LARGE.value());
         response.setContentType("application/problem+json");
         response.setCharacterEncoding(StandardCharsets.UTF_8.name());
-        response.getWriter().write("{\"type\":\"about:blank\",\"title\":\"Payload Too Large\",\"status\":413,\"detail\":\"Request body exceeds maximum size of 81920 bytes\"}");
+        response.getWriter().write("{\"type\":\"about:blank\",\"title\":\"Payload Too Large\",\"status\":413,\"detail\":\"Request body exceeds maximum size of " + limit + " bytes\"}");
     }
 
     private static class BoundedSizeRequestWrapper extends HttpServletRequestWrapper {
