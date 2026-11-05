@@ -1,16 +1,16 @@
 # STATUS (single status log)
 
 Update this file at the end of every task. It is the first thing every model and the founder reads.
-Last updated: 2026-11-04 by Gemini 3.8 Flash (PLAN-0010)
+Last updated: 2026-11-05 by Gemini 3.8 Flash (PLAN-0011)
 
 ## Current
 | Item | Value |
 |---|---|
 | Product version | **0.1.0 pending** (Phase 0 built; tag v0.1.0 to be re-created on the final main commit after acceptance) |
-| Docs baseline | README v1.2 (decision log D-01 to D-86) |
+| Docs baseline | README v1.2 (decision log D-01 to D-93) |
 | Current phase | **Phase 1: Engine core** |
-| Current step | Phase 1, step 1d-ii |
-| Next task | PLAN-0011: charge generation (Phase 1, step 1d-ii) |
+| Current step | Phase 1, step 1e |
+| Next task | PLAN-0012: documents and storage (Phase 1, step 1e) |
 
 ## Version scheme
 - 0.x while building: 0.1.0 = Phase 0 done, 0.2.0 = Phase 1 done, 0.3.0 = Phase 2 done.
@@ -42,7 +42,7 @@ Last updated: 2026-11-04 by Gemini 3.8 Flash (PLAN-0010)
 - [x] 1b. Apps and definition versions API (PLAN-0008)
 - [x] 1c. Parties and records with custom fields (PLAN-0009)
 - [x] 1d-i. Ledger core (PLAN-0010)
-- [ ] 1d-ii. Charge generation (PLAN-0011)
+- [x] 1d-ii. Charge generation (PLAN-0011)
 - [ ] 1e. Documents and storage
 - [ ] 1f. Reminder engine
 - [ ] 1g. Forms and dashboard generation
@@ -82,6 +82,7 @@ Last updated: 2026-11-04 by Gemini 3.8 Flash (PLAN-0010)
 ## Task log
 | Date | Task | Done by | Result |
 |---|---|---|---|
+| 2026-11-05 | PLAN-0011: charge generation (Phase 1, step 1d-ii) | Gemini 3.8 Flash | Done |
 | 2026-11-04 | PLAN-0010: ledger core (Phase 1, step 1d-i) | Gemini 3.8 Flash | Done |
 | 2026-11-04 | PLAN-0009: parties and records (Phase 1, step 1c) | Gemini 3.8 Flash | Done |
 | 2026-11-04 | PLAN-0008: apps and definition versions API (Phase 1, step 1b) | Gemini 3.8 Flash | Done |

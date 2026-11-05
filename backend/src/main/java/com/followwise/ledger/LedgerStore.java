@@ -352,4 +352,117 @@ public class LedgerStore {
 
         return spec.query(Long.class).single();
     }
+
+    public int insertEntryOnConflictDoNothing(UUID id, UUID workspaceId, UUID appId, UUID partyId, UUID chargeId,
+                                             String entryType, long amountCents, String currency, String kind,
+                                             String scheduleId, String periodKey, String label, LocalDate dueDate,
+                                             LocalDate paidOn, String note, UUID reversesEntryId,
+                                             UUID idempotencyKey, String requestHash, UUID createdBy) {
+        return jdbcClient.sql("""
+                INSERT INTO ledger_entries (
+                    id, workspace_id, app_id, party_id, charge_id, entry_type,
+                    amount_cents, currency, kind, schedule_id, period_key,
+                    label, due_date, paid_on, note, reverses_entry_id,
+                    idempotency_key, request_hash, created_by
+                ) VALUES (
+                    :id, :wid, :aid, :pid, :cid, :entryType,
+                    :amountCents, :currency, :kind, :scheduleId, :periodKey,
+                    :label, :dueDate, :paidOn, :note, :reversesEntryId,
+                    :idempotencyKey, :requestHash, :createdBy
+                )
+                ON CONFLICT (app_id, party_id, schedule_id, period_key)
+                WHERE entry_type = 'CHARGE' AND period_key IS NOT NULL
+                DO NOTHING
+                """)
+                .param("id", id)
+                .param("wid", workspaceId)
+                .param("aid", appId)
+                .param("pid", partyId)
+                .param("cid", chargeId)
+                .param("entryType", entryType)
+                .param("amountCents", amountCents)
+                .param("currency", currency)
+                .param("kind", kind)
+                .param("scheduleId", scheduleId)
+                .param("periodKey", periodKey)
+                .param("label", label)
+                .param("dueDate", dueDate)
+                .param("paidOn", paidOn)
+                .param("note", note)
+                .param("reversesEntryId", reversesEntryId)
+                .param("idempotencyKey", idempotencyKey)
+                .param("requestHash", requestHash)
+                .param("createdBy", createdBy)
+                .update();
+    }
+
+    public boolean existsSchedulePeriodCharge(UUID workspaceId, UUID appId, UUID partyId, String scheduleId, String periodKey) {
+        return jdbcClient.sql("""
+                SELECT EXISTS (
+                    SELECT 1 FROM ledger_entries
+                    WHERE workspace_id = :wid AND app_id = :aid AND party_id = :pid
+                      AND schedule_id = :sid AND period_key = :pkey
+                      AND entry_type = 'CHARGE'
+                )
+                """)
+                .param("wid", workspaceId)
+                .param("aid", appId)
+                .param("pid", partyId)
+                .param("sid", scheduleId)
+                .param("pkey", periodKey)
+                .query(Boolean.class)
+                .single();
+    }
+
+    public record OverdueChargeCandidate(
+            UUID chargeId,
+            UUID partyId,
+            String label,
+            LocalDate dueDate,
+            String partyDataJson
+    ) {}
+
+    public List<OverdueChargeCandidate> findOverdueChargesForLateFee(
+            UUID workspaceId, UUID appId, String partyType, int graceDays, LocalDate today) {
+        return jdbcClient.sql("""
+                SELECT c.id AS charge_id, c.party_id, c.label, c.due_date, p.data::text AS party_data
+                FROM ledger_entries c
+                JOIN parties p ON p.id = c.party_id AND p.workspace_id = c.workspace_id AND p.app_id = c.app_id
+                WHERE c.workspace_id = :wid
+                  AND c.app_id = :aid
+                  AND c.entry_type = 'CHARGE'
+                  AND c.kind IN ('recurring', 'manual')
+                  AND p.party_type = :partyType
+                  AND p.archived_at IS NULL
+                  AND (c.due_date + CAST(:graceDays AS integer)) < :today
+                  AND NOT EXISTS (
+                      SELECT 1 FROM ledger_entries r
+                      WHERE r.workspace_id = c.workspace_id
+                        AND r.app_id = c.app_id
+                        AND r.charge_id = c.id
+                        AND r.reverses_entry_id = c.id
+                  )
+                  AND (
+                      SELECT COALESCE(SUM(amount_cents), 0)::bigint
+                      FROM ledger_entries e
+                      WHERE e.workspace_id = c.workspace_id
+                        AND e.app_id = c.app_id
+                        AND e.charge_id = c.id
+                  ) > 0
+                ORDER BY c.due_date ASC, c.id ASC
+                """)
+                .param("wid", workspaceId)
+                .param("aid", appId)
+                .param("partyType", partyType)
+                .param("graceDays", graceDays)
+                .param("today", today)
+                .query((rs, rowNum) -> new OverdueChargeCandidate(
+                        rs.getObject("charge_id", UUID.class),
+                        rs.getObject("party_id", UUID.class),
+                        rs.getString("label"),
+                        rs.getObject("due_date", LocalDate.class),
+                        rs.getString("party_data")
+                ))
+                .list();
+    }
 }

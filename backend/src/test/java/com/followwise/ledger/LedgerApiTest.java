@@ -219,9 +219,6 @@ class LedgerApiTest extends AbstractIntegrationTest {
 
     private void cleanDb() {
         TestDbHelper.cleanDatabase(dataSource);
-        membershipRepository.deleteAll();
-        workspaceRepository.deleteAll();
-        userRepository.deleteAll();
     }
 
     private String createChargeJson(String label, long amountCents, String dueDate, String scheduleId) {

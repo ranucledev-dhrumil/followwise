@@ -16,10 +16,19 @@ public class LedgerController {
 
     private final LedgerService ledgerService;
     private final LedgerPayloadParser ledgerPayloadParser;
+    private final ChargeGeneratorService chargeGeneratorService;
+    private final com.followwise.workspace.AccessService accessService;
 
-    public LedgerController(LedgerService ledgerService, LedgerPayloadParser ledgerPayloadParser) {
+    public LedgerController(
+            LedgerService ledgerService,
+            LedgerPayloadParser ledgerPayloadParser,
+            ChargeGeneratorService chargeGeneratorService,
+            com.followwise.workspace.AccessService accessService
+    ) {
         this.ledgerService = ledgerService;
         this.ledgerPayloadParser = ledgerPayloadParser;
+        this.chargeGeneratorService = chargeGeneratorService;
+        this.accessService = accessService;
     }
 
     private UUID parseIdempotencyKey(String header) {
@@ -131,5 +140,25 @@ public class LedgerController {
     ) {
         UUID userId = UUID.fromString(jwt.getSubject());
         return ResponseEntity.ok(ledgerService.getCharge(workspaceId, appId, chargeId, userId));
+    }
+
+    @PostMapping("/charges/generate")
+    public ResponseEntity<ChargeGenerationResult> generateCharges(
+            @PathVariable("workspaceId") UUID workspaceId,
+            @PathVariable("appId") UUID appId,
+            @RequestParam(value = "dryRun", defaultValue = "false") String dryRunParam,
+            @AuthenticationPrincipal Jwt jwt
+    ) {
+        if (!"true".equalsIgnoreCase(dryRunParam) && !"false".equalsIgnoreCase(dryRunParam)) {
+            throw new LedgerBadRequestException("dryRun must be 'true' or 'false'");
+        }
+        boolean dryRun = Boolean.parseBoolean(dryRunParam);
+        UUID userId = UUID.fromString(jwt.getSubject());
+        accessService.requirePermission(workspaceId, userId, com.followwise.workspace.Permission.MANAGE_LEDGER);
+
+        ChargeGenerationResult result = chargeGeneratorService.generateForApp(
+                workspaceId, appId, userId, dryRun, false
+        );
+        return ResponseEntity.ok(result);
     }
 }

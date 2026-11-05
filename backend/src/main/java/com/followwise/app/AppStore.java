@@ -185,4 +185,31 @@ public class AppStore {
                 .param("wid", workspaceId)
                 .update();
     }
+
+    public record WorkspaceAppId(UUID workspaceId, UUID appId) {}
+
+    public List<WorkspaceAppId> findActiveAppIds() {
+        return jdbcClient.sql("""
+                SELECT workspace_id, id AS app_id
+                FROM apps
+                WHERE archived_at IS NULL
+                ORDER BY id ASC
+                """)
+                .query((rs, rowNum) -> new WorkspaceAppId(
+                        rs.getObject("workspace_id", UUID.class),
+                        rs.getObject("app_id", UUID.class)
+                ))
+                .list();
+    }
+
+    public Optional<UUID> lockAppRow(UUID workspaceId, UUID appId, boolean skipLocked) {
+        String sql = skipLocked
+                ? "SELECT id FROM apps WHERE id = :aid AND workspace_id = :wid AND archived_at IS NULL FOR UPDATE SKIP LOCKED"
+                : "SELECT id FROM apps WHERE id = :aid AND workspace_id = :wid AND archived_at IS NULL FOR UPDATE";
+        return jdbcClient.sql(sql)
+                .param("aid", appId)
+                .param("wid", workspaceId)
+                .query(UUID.class)
+                .optional();
+    }
 }

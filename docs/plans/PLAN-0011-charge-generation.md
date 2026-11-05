@@ -1,8 +1,8 @@
 # PLAN-0011: Charge generation
 
-Status: APPROVED        <!-- DRAFT -> APPROVED (founder) -> IN PROGRESS -> DONE | BLOCKED -->
+Status: DONE        <!-- DRAFT -> APPROVED (founder) -> IN PROGRESS -> DONE | BLOCKED -->
 Phase / step: Phase 1, step 1d-ii
-Author: Claude Sonnet 4.6   Executor: (model that executed)
+Author: Claude Sonnet 4.6   Executor: Gemini 3.8 Flash
 Branch: plan-0011 (created by the founder; AI models run no git)
 
 ## Goal
@@ -166,7 +166,55 @@ L. Report: list every deviation. Log line format: | YYYY-MM-DD | PLAN-0011: char
 ---
 ## Execution report (executor fills)
 - What was done:
+  - Slice 0: Created Flyway migration `V8__charge_generation.sql` inserting dedicated SYSTEM user with fixed UUID, unmatchable `{bcrypt}` password, and `locked_until = 'infinity'`. Added `SystemUser` class and integrated guards into `AuthService` (login, forgot-password, resend-verification, verify-email, reset-password).
+  - Slice 1: Added charge generation settings to `application.properties` and `.env.example`. Implemented `ChargeGenerationResult` record, query & locking helpers in `AppStore`, `PartyStore`, and `LedgerStore`, and core generation engine in `ChargeGeneratorService` with startup validation, timezone awareness, partial-index `ON CONFLICT DO NOTHING` idempotency, party creation date boundaries, and sanitized log output.
+  - Slice 2: Implemented `ChargeGenerationScheduler` with `@Scheduled` fixed delay, random initial delay, and `@ConditionalOnProperty(name="app.scheduler-enabled", havingValue="true")`. Configured per-app transaction isolation ensuring individual app failures do not disrupt the run.
+  - Slice 3: Extended `BodySizeFilter` for `/charges/generate` with 1024-byte limit. Added `POST /api/workspaces/{wid}/apps/{aid}/charges/generate` endpoint in `LedgerController` with `dryRun` validation and strict check order.
+  - Slice 4: Implemented comprehensive test coverage across `ChargeGenerationTest` and `ChargeGenerationSchedulerTest` (28 new tests, 198 total passing tests). Appended D-87 through D-93 to `README.md` section 14.1 and updated `docs/STATUS.md`.
+
 - Files changed (grouped by slice):
+  - Slice 0:
+    - `backend/src/main/resources/db/migration/V8__charge_generation.sql`
+    - `backend/src/main/java/com/followwise/identity/SystemUser.java`
+    - `backend/src/main/java/com/followwise/identity/AuthService.java`
+  - Slice 1:
+    - `backend/src/main/resources/application.properties`
+    - `.env.example`
+    - `backend/src/main/java/com/followwise/ledger/ChargeGenerationResult.java`
+    - `backend/src/main/java/com/followwise/app/AppStore.java`
+    - `backend/src/main/java/com/followwise/party/PartyStore.java`
+    - `backend/src/main/java/com/followwise/ledger/LedgerStore.java`
+    - `backend/src/main/java/com/followwise/ledger/ChargeGeneratorService.java`
+  - Slice 2:
+    - `backend/src/main/java/com/followwise/ledger/ChargeGenerationScheduler.java`
+  - Slice 3:
+    - `backend/src/main/java/com/followwise/app/BodySizeFilter.java`
+    - `backend/src/main/java/com/followwise/ledger/LedgerController.java`
+  - Slice 4:
+    - `backend/src/test/java/com/followwise/TestDbHelper.java`
+    - `backend/src/test/java/com/followwise/ledger/LedgerApiTest.java`
+    - `backend/src/test/java/com/followwise/ledger/ChargeGenerationTest.java`
+    - `backend/src/test/java/com/followwise/ledger/ChargeGenerationSchedulerTest.java`
+    - `README.md`
+    - `docs/STATUS.md`
+    - `docs/plans/PLAN-0011-charge-generation.md`
+
 - Commands run and results (no git commands):
+  - `Set-Location backend; mvn test` (Slice 0): 169 tests run, 0 failures, 0 errors.
+  - `Set-Location backend; mvn test` (Slice 1): 169 tests run, 0 failures, 0 errors.
+  - `Set-Location backend; mvn test` (Slice 2): 169 tests run, 0 failures, 0 errors.
+  - `Set-Location backend; mvn test` (Slice 3): 169 tests run, 0 failures, 0 errors.
+  - `Set-Location backend; mvn test` (Slice 4): 198 tests run, 0 failures, 0 errors, 0 skipped.
+
 - Deviations from the plan:
+  - Updated `TestDbHelper.cleanDatabase` to preserve the fixed SYSTEM user identity and re-insert it `ON CONFLICT (id) DO NOTHING`, avoiding user wipes across test executions.
+  - Replaced `userRepository.deleteAll()` in `LedgerApiTest.cleanDb()` with delegation to `TestDbHelper.cleanDatabase()` to prevent cross-test identity corruption.
+
+- Verified items and sources:
+  1. Spring Boot 4.1 `@Scheduled` with SpEL fixed delay, random initial delay, and `@ConditionalOnProperty`: Spring Framework Reference (Scheduling: https://docs.spring.io/spring-framework/reference/integration/scheduling.html#scheduling-annotation-support-scheduled); verified by `ChargeGenerationSchedulerTest`.
+  2. PostgreSQL `SELECT ... FOR UPDATE SKIP LOCKED` on a single row skips locked rows without blocking: PostgreSQL Reference (Explicit Locking: https://www.postgresql.org/docs/current/explicit-locking.html#LOCKING-ROWS); verified by `ChargeGenerationTest.schedulerSkipsLockedApp_whileEndpointWaits`.
+  3. `INSERT ... ON CONFLICT DO NOTHING` on partial unique index requires repeating the index WHERE clause in the conflict target: PostgreSQL Reference (INSERT: https://www.postgresql.org/docs/current/sql-insert.html); verified by `ChargeGenerationTest.idempotentRerun_skippedExisting_andConcurrentRuns`.
+  4. System user login lockout via unmatchable `{bcrypt}` hash, `locked_until = 'infinity'`, and authentication service guard: DelegatingPasswordEncoder specification & RFC 2307; verified by `ChargeGenerationTest.systemUserGuards`.
+
 - Follow-ups or new risks:
+  - None. Ready for PLAN-0012 (documents and storage).
