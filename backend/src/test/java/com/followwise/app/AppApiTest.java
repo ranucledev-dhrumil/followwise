@@ -1,6 +1,7 @@
 package com.followwise.app;
 
 import com.followwise.AbstractIntegrationTest;
+import com.followwise.TestDbHelper;
 import com.followwise.appdef.TemplateRegistry;
 import com.followwise.identity.User;
 import com.followwise.identity.UserRepository;
@@ -69,6 +70,9 @@ class AppApiTest extends AbstractIntegrationTest {
     @Autowired
     private JdbcClient jdbcClient;
 
+    @Autowired
+    private javax.sql.DataSource dataSource;
+
     private UUID workspace1Id;
     private UUID workspace2Id;
     private UUID ownerId;
@@ -83,10 +87,7 @@ class AppApiTest extends AbstractIntegrationTest {
 
     @BeforeEach
     void setUp() {
-        jdbcClient.sql("DELETE FROM parties").update();
-        jdbcClient.sql("DELETE FROM records").update();
-        jdbcClient.sql("DELETE FROM app_definition_versions").update();
-        jdbcClient.sql("DELETE FROM apps").update();
+        TestDbHelper.cleanDatabase(dataSource);
         membershipRepository.deleteAll();
         workspaceRepository.deleteAll();
         userRepository.deleteAll();
@@ -122,8 +123,7 @@ class AppApiTest extends AbstractIntegrationTest {
 
     @AfterEach
     void tearDown() {
-        jdbcClient.sql("DELETE FROM app_definition_versions").update();
-        jdbcClient.sql("DELETE FROM apps").update();
+        TestDbHelper.cleanDatabase(dataSource);
         membershipRepository.deleteAll();
         workspaceRepository.deleteAll();
         userRepository.deleteAll();

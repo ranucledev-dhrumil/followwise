@@ -10,6 +10,7 @@ import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ObjectNode;
 
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
@@ -54,7 +55,7 @@ public class AppPayloadParser {
         try {
             return jsonMapper.readTree(rawBody);
         } catch (Exception e) {
-            String msg = e.getMessage() != null ? e.getMessage().toLowerCase() : "";
+            String msg = e.getMessage() != null ? e.getMessage().toLowerCase(Locale.ROOT) : "";
             if (msg.contains("duplicate")) {
                 throw new AppValidationException(List.of(new ValidationError("#", "duplicate JSON key")));
             }

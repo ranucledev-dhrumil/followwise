@@ -24,6 +24,7 @@ public class BodySizeFilter extends OncePerRequestFilter {
 
     public static final int MAX_SIZE = 81920;
     public static final int DATA_MAX_SIZE = 32768;
+    public static final int LEDGER_MAX_SIZE = 8192;
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
@@ -40,10 +41,16 @@ public class BodySizeFilter extends OncePerRequestFilter {
                 || (method.equalsIgnoreCase("POST") && uri.matches("^/api/workspaces/[^/]+/apps/[^/]+/records/?$"))
                 || (method.equalsIgnoreCase("PUT") && uri.matches("^/api/workspaces/[^/]+/apps/[^/]+/records/[^/]+/?$"));
 
+        boolean isLedgerTarget = (method.equalsIgnoreCase("POST") && uri.matches("^/api/workspaces/[^/]+/apps/[^/]+/parties/[^/]+/charges/?$"))
+                || (method.equalsIgnoreCase("POST") && uri.matches("^/api/workspaces/[^/]+/apps/[^/]+/charges/[^/]+/payments/?$"))
+                || (method.equalsIgnoreCase("POST") && uri.matches("^/api/workspaces/[^/]+/apps/[^/]+/ledger/[^/]+/reverse/?$"));
+
         if (isAppTarget) {
             limit = MAX_SIZE;
         } else if (isDataTarget) {
             limit = DATA_MAX_SIZE;
+        } else if (isLedgerTarget) {
+            limit = LEDGER_MAX_SIZE;
         } else {
             filterChain.doFilter(request, response);
             return;

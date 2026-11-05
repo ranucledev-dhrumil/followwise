@@ -8,7 +8,10 @@ public enum Permission {
     VIEW_APP(Set.of(Role.OWNER, Role.STAFF)),
     MANAGE_APPS(Set.of(Role.OWNER)),
     VIEW_DATA(Set.of(Role.OWNER, Role.STAFF)),
-    EDIT_DATA(Set.of(Role.OWNER, Role.STAFF));
+    EDIT_DATA(Set.of(Role.OWNER, Role.STAFF)),
+    VIEW_LEDGER(Set.of(Role.OWNER, Role.STAFF)),
+    RECORD_PAYMENT(Set.of(Role.OWNER, Role.STAFF)),
+    MANAGE_LEDGER(Set.of(Role.OWNER));
 
     private final Set<Role> grantedRoles;
 

@@ -17,6 +17,7 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 @Component
@@ -95,10 +96,10 @@ public class AppDefinitionValidator {
             return List.of(new ValidationError("#", "maximum nesting depth exceeded"));
         } catch (Exception e) {
             String msg = e.getMessage() != null ? e.getMessage() : "";
-            if (msg.toLowerCase().contains("duplicate")) {
+            if (msg.toLowerCase(Locale.ROOT).contains("duplicate")) {
                 return List.of(new ValidationError("#", "duplicate JSON key"));
             }
-            if (msg.toLowerCase().contains("depth")) {
+            if (msg.toLowerCase(Locale.ROOT).contains("depth")) {
                 return List.of(new ValidationError("#", "maximum nesting depth exceeded"));
             }
             return List.of(new ValidationError("#", "invalid JSON syntax"));

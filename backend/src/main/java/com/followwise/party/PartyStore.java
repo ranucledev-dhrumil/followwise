@@ -7,6 +7,7 @@ import org.springframework.stereotype.Repository;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -43,6 +44,15 @@ public class PartyStore {
         return jdbcClient.sql("SELECT id FROM apps WHERE id = :aid AND workspace_id = :wid AND archived_at IS NULL FOR UPDATE")
                 .param("aid", appId)
                 .param("wid", workspaceId)
+                .query(UUID.class)
+                .optional();
+    }
+
+    public Optional<UUID> lockPartyRow(UUID workspaceId, UUID appId, UUID partyId) {
+        return jdbcClient.sql("SELECT id FROM parties WHERE id = :pid AND workspace_id = :wid AND app_id = :aid FOR UPDATE")
+                .param("pid", partyId)
+                .param("wid", workspaceId)
+                .param("aid", appId)
                 .query(UUID.class)
                 .optional();
     }
@@ -130,7 +140,7 @@ public class PartyStore {
 
         if (hasQ) {
             String escaped = escapeLike(q.trim());
-            spec.param("pattern", escaped.toLowerCase() + "%");
+            spec.param("pattern", escaped.toLowerCase(Locale.ROOT) + "%");
         }
 
         return spec.query(PARTY_ROW_MAPPER).list();
@@ -159,7 +169,7 @@ public class PartyStore {
 
         if (hasQ) {
             String escaped = escapeLike(q.trim());
-            spec.param("pattern", escaped.toLowerCase() + "%");
+            spec.param("pattern", escaped.toLowerCase(Locale.ROOT) + "%");
         }
 
         return spec.query(Long.class).single();

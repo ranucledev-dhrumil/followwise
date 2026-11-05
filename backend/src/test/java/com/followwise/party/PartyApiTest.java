@@ -1,6 +1,7 @@
 package com.followwise.party;
 
 import com.followwise.AbstractIntegrationTest;
+import com.followwise.TestDbHelper;
 import com.followwise.app.AppPayloadParser;
 import com.followwise.app.AppResponse;
 import com.followwise.app.AppService;
@@ -59,6 +60,9 @@ class PartyApiTest extends AbstractIntegrationTest {
 
     @Autowired
     private JdbcClient jdbcClient;
+
+    @Autowired
+    private javax.sql.DataSource dataSource;
 
     private final JsonMapper jsonMapper = JsonMapper.builder().build();
 
@@ -124,10 +128,7 @@ class PartyApiTest extends AbstractIntegrationTest {
     }
 
     private void cleanDb() {
-        jdbcClient.sql("DELETE FROM parties").update();
-        jdbcClient.sql("DELETE FROM records").update();
-        jdbcClient.sql("DELETE FROM app_definition_versions").update();
-        jdbcClient.sql("DELETE FROM apps").update();
+        TestDbHelper.cleanDatabase(dataSource);
         membershipRepository.deleteAll();
         workspaceRepository.deleteAll();
         userRepository.deleteAll();
@@ -1752,5 +1753,42 @@ class PartyApiTest extends AbstractIntegrationTest {
                         .header("Authorization", "Bearer " + ownerToken))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.detail").value("unknown type"));
+    }
+
+    @Test
+    void prefixSearch_localeRoot_stillWorks() throws Exception {
+        AppResponse cdtApp = appService.createApp(workspace1Id, ownerId,
+                new AppPayloadParser.ParsedCreateAppRequest("client-document-tracker", "CDT Locale App", "UTC"));
+
+        String clientJson = """
+                {
+                  "type": "client",
+                  "data": {
+                    "name": "Istanbul Resident",
+                    "email": "istanbul@example.com"
+                  }
+                }
+                """;
+
+        mockMvc.perform(post("/api/workspaces/" + workspace1Id + "/apps/" + cdtApp.id() + "/parties")
+                        .header("Authorization", "Bearer " + ownerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(clientJson))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.displayName").value("Istanbul Resident"));
+
+        // Case-insensitive prefix search with lowercase query "ist" matches uppercase "Istanbul"
+        mockMvc.perform(get("/api/workspaces/" + workspace1Id + "/apps/" + cdtApp.id() + "/parties?type=client&q=ist")
+                        .header("Authorization", "Bearer " + ownerToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items", hasSize(1)))
+                .andExpect(jsonPath("$.items[0].displayName").value("Istanbul Resident"));
+
+        // Prefix search with uppercase query "IST" matches uppercase "Istanbul"
+        mockMvc.perform(get("/api/workspaces/" + workspace1Id + "/apps/" + cdtApp.id() + "/parties?type=client&q=IST")
+                        .header("Authorization", "Bearer " + ownerToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items", hasSize(1)))
+                .andExpect(jsonPath("$.items[0].displayName").value("Istanbul Resident"));
     }
 }

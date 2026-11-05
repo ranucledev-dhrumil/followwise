@@ -7,6 +7,7 @@ import org.springframework.stereotype.Repository;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -130,7 +131,7 @@ public class RecordStore {
 
         if (hasQ) {
             String escaped = escapeLike(q.trim());
-            spec.param("pattern", escaped.toLowerCase() + "%");
+            spec.param("pattern", escaped.toLowerCase(Locale.ROOT) + "%");
         }
 
         return spec.query(RECORD_ROW_MAPPER).list();
@@ -159,7 +160,7 @@ public class RecordStore {
 
         if (hasQ) {
             String escaped = escapeLike(q.trim());
-            spec.param("pattern", escaped.toLowerCase() + "%");
+            spec.param("pattern", escaped.toLowerCase(Locale.ROOT) + "%");
         }
 
         return spec.query(Long.class).single();
