@@ -129,7 +129,7 @@ public class AuthService {
         Instant now = Instant.now();
 
         Optional<User> userOpt = userRepository.findByEmail(normalizedEmail);
-        if (userOpt.isEmpty()) {
+        if (userOpt.isEmpty() || SystemUser.ID.equals(userOpt.get().getId())) {
             passwordService.runDummyMatch(request.password());
             throw new InvalidCredentialsException();
         }
@@ -224,12 +224,18 @@ public class AuthService {
             throw new InvalidTokenException("Invalid or expired token");
         }
         AuthToken token = tokenOpt.get();
+        if (SystemUser.ID.equals(token.getUserId())) {
+            throw new InvalidTokenException("Invalid or expired token");
+        }
         Instant now = Instant.now();
         userRepository.markEmailVerified(token.getUserId(), now);
     }
 
     @Transactional
     public void resendVerification(UUID userId) {
+        if (SystemUser.ID.equals(userId)) {
+            throw new IllegalArgumentException("User not found");
+        }
         Instant now = Instant.now();
         long countLast60s = authTokenService.countTokensSince(userId, AuthToken.TYPE_VERIFY_EMAIL, now.minus(60, ChronoUnit.SECONDS));
         if (countLast60s >= 1) {
@@ -264,7 +270,7 @@ public class AuthService {
         }
         String normalizedEmail = email.trim().toLowerCase(Locale.ROOT);
         Optional<User> userOpt = userRepository.findByEmail(normalizedEmail);
-        if (userOpt.isEmpty()) {
+        if (userOpt.isEmpty() || SystemUser.ID.equals(userOpt.get().getId())) {
             return;
         }
         User user = userOpt.get();
@@ -300,6 +306,9 @@ public class AuthService {
             throw new InvalidTokenException("Invalid or expired token");
         }
         AuthToken token = tokenOpt.get();
+        if (SystemUser.ID.equals(token.getUserId())) {
+            throw new InvalidTokenException("Invalid or expired token");
+        }
 
         Instant now = Instant.now();
         User user = userRepository.findById(token.getUserId())

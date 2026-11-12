@@ -129,9 +129,6 @@ class PartyApiTest extends AbstractIntegrationTest {
 
     private void cleanDb() {
         TestDbHelper.cleanDatabase(dataSource);
-        membershipRepository.deleteAll();
-        workspaceRepository.deleteAll();
-        userRepository.deleteAll();
     }
 
     private void assertSanitizedErrorResponse(String responseJson) {

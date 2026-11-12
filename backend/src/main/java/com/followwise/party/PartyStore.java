@@ -256,6 +256,21 @@ public class PartyStore {
                 .orElse(RefChecker.TargetStatus.NOT_FOUND);
     }
 
+    public List<PartyRecord> findActiveByPartyType(UUID workspaceId, UUID appId, String partyType) {
+        return jdbcClient.sql("""
+                SELECT id, workspace_id, app_id, party_type, display_name, data::text AS data,
+                       definition_version, version, created_by, updated_by, created_at, updated_at, archived_at
+                FROM parties
+                WHERE workspace_id = :wid AND app_id = :aid AND party_type = :partyType AND archived_at IS NULL
+                ORDER BY id ASC
+                """)
+                .param("wid", workspaceId)
+                .param("aid", appId)
+                .param("partyType", partyType)
+                .query(PARTY_ROW_MAPPER)
+                .list();
+    }
+
     private static String escapeLike(String input) {
         return input.replace("\\", "\\\\")
                 .replace("%", "\\%")

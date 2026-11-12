@@ -38,6 +38,9 @@ class WorkspaceTenantIsolationTest extends AbstractIntegrationTest {
     @Autowired
     private TokenService tokenService;
 
+    @Autowired
+    private javax.sql.DataSource dataSource;
+
     private UUID workspace1Id;
     private UUID workspace2Id;
 
@@ -48,9 +51,7 @@ class WorkspaceTenantIsolationTest extends AbstractIntegrationTest {
 
     @BeforeEach
     void setUp() {
-        membershipRepository.deleteAll();
-        workspaceRepository.deleteAll();
-        userRepository.deleteAll();
+        com.followwise.TestDbHelper.cleanDatabase(dataSource);
 
         Instant now = Instant.now();
 

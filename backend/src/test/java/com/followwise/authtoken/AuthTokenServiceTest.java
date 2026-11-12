@@ -25,12 +25,14 @@ class AuthTokenServiceTest extends AbstractIntegrationTest {
     @Autowired
     private UserRepository userRepository;
 
+    @Autowired
+    private javax.sql.DataSource dataSource;
+
     private User testUser;
 
     @BeforeEach
     void cleanUp() {
-        authTokenRepository.deleteAll();
-        userRepository.deleteAll();
+        com.followwise.TestDbHelper.cleanDatabase(dataSource);
 
         Instant now = Instant.now();
         testUser = new User(UUID.randomUUID(), "test-" + UUID.randomUUID() + "@example.com", "hash", now);

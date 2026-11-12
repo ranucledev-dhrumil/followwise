@@ -47,12 +47,12 @@ class AuthIntegrationTest extends AbstractIntegrationTest {
     @Autowired
     private AuthService authService;
 
+    @Autowired
+    private javax.sql.DataSource dataSource;
+
     @BeforeEach
     void cleanUp() {
-        refreshTokenRepository.deleteAll();
-        membershipRepository.deleteAll();
-        workspaceRepository.deleteAll();
-        userRepository.deleteAll();
+        com.followwise.TestDbHelper.cleanDatabase(dataSource);
     }
 
     @Test

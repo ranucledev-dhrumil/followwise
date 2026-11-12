@@ -88,9 +88,6 @@ class AppApiTest extends AbstractIntegrationTest {
     @BeforeEach
     void setUp() {
         TestDbHelper.cleanDatabase(dataSource);
-        membershipRepository.deleteAll();
-        workspaceRepository.deleteAll();
-        userRepository.deleteAll();
 
         Instant now = Instant.now();
 
@@ -124,9 +121,6 @@ class AppApiTest extends AbstractIntegrationTest {
     @AfterEach
     void tearDown() {
         TestDbHelper.cleanDatabase(dataSource);
-        membershipRepository.deleteAll();
-        workspaceRepository.deleteAll();
-        userRepository.deleteAll();
     }
 
     @Test

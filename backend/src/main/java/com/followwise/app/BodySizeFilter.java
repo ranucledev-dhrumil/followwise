@@ -45,7 +45,12 @@ public class BodySizeFilter extends OncePerRequestFilter {
                 || (method.equalsIgnoreCase("POST") && uri.matches("^/api/workspaces/[^/]+/apps/[^/]+/charges/[^/]+/payments/?$"))
                 || (method.equalsIgnoreCase("POST") && uri.matches("^/api/workspaces/[^/]+/apps/[^/]+/ledger/[^/]+/reverse/?$"));
 
-        if (isAppTarget) {
+        boolean isGenerateTarget = method.equalsIgnoreCase("POST")
+                && uri.matches("^/api/workspaces/[^/]+/apps/[^/]+/charges/generate/?$");
+
+        if (isGenerateTarget) {
+            limit = 1024;
+        } else if (isAppTarget) {
             limit = MAX_SIZE;
         } else if (isDataTarget) {
             limit = DATA_MAX_SIZE;

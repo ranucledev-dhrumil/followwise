@@ -64,14 +64,12 @@ class EmailVerificationIntegrationTest extends AbstractIntegrationTest {
     @MockitoBean
     private EmailSender emailSender;
 
+    @Autowired
+    private javax.sql.DataSource dataSource;
+
     @BeforeEach
     void cleanUp() {
-        authTokenRepository.deleteAll();
-        outboxRepository.deleteAll();
-        membershipRepository.deleteAll();
-        workspaceRepository.deleteAll();
-        refreshTokenRepository.deleteAll();
-        userRepository.deleteAll();
+        com.followwise.TestDbHelper.cleanDatabase(dataSource);
     }
 
     @Test

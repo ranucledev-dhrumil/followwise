@@ -37,12 +37,12 @@ class RefreshTokenIntegrationTest extends AbstractIntegrationTest {
     @Autowired
     private RefreshTokenRepository refreshTokenRepository;
 
+    @Autowired
+    private javax.sql.DataSource dataSource;
+
     @BeforeEach
     void cleanUp() {
-        refreshTokenRepository.deleteAll();
-        membershipRepository.deleteAll();
-        workspaceRepository.deleteAll();
-        userRepository.deleteAll();
+        com.followwise.TestDbHelper.cleanDatabase(dataSource);
     }
 
     @Test
