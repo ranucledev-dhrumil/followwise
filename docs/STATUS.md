@@ -1,16 +1,16 @@
 # STATUS (single status log)
 
 Update this file at the end of every task. It is the first thing every model and the founder reads.
-Last updated: 2026-11-05 by Gemini 3.8 Flash (PLAN-0011 Addendum 1)
+Last updated: 2026-11-12 by Gemini (PLAN-0012)
 
 ## Current
 | Item | Value |
 |---|---|
 | Product version | **0.1.0 pending** (Phase 0 built; tag v0.1.0 to be re-created on the final main commit after acceptance) |
-| Docs baseline | README v1.2 (decision log D-01 to D-93) |
+| Docs baseline | README v1.2 (decision log D-01 to D-100) |
 | Current phase | **Phase 1: Engine core** |
-| Current step | Phase 1, step 1e |
-| Next task | PLAN-0012: documents and storage (Phase 1, step 1e) |
+| Current step | Phase 1, step 1e-ii |
+| Next task | PLAN-0013: document workflow (Phase 1, step 1e-ii) |
 
 ## Version scheme
 - 0.x while building: 0.1.0 = Phase 0 done, 0.2.0 = Phase 1 done, 0.3.0 = Phase 2 done.
@@ -43,8 +43,9 @@ Last updated: 2026-11-05 by Gemini 3.8 Flash (PLAN-0011 Addendum 1)
 - [x] 1c. Parties and records with custom fields (PLAN-0009)
 - [x] 1d-i. Ledger core (PLAN-0010)
 - [x] 1d-ii. Charge generation (PLAN-0011)
-- [ ] 1e. Documents and storage
-- [ ] 1f. Reminder engine
+- [x] 1e-i. Document storage and requests (PLAN-0012)
+- [ ] 1e-ii. Document workflow (PLAN-0013)
+- [ ] 1f. Reminder engine (PLAN-0014)
 - [ ] 1g. Forms and dashboard generation
 
 ## Founder manual tasks (Phase 0)
@@ -82,6 +83,7 @@ Last updated: 2026-11-05 by Gemini 3.8 Flash (PLAN-0011 Addendum 1)
 ## Task log
 | Date | Task | Done by | Result |
 |---|---|---|---|
+| 2026-11-12 | PLAN-0012: documents and storage (Phase 1, step 1e-i) | Gemini 3.8 Flash | Done |
 | 2026-11-05 | PLAN-0011: charge generation & Addendum 1 (Phase 1, step 1d-ii) | Gemini 3.8 Flash | Done |
 | 2026-11-04 | PLAN-0010: ledger core (Phase 1, step 1d-i) | Gemini 3.8 Flash | Done |
 | 2026-11-04 | PLAN-0009: parties and records (Phase 1, step 1c) | Gemini 3.8 Flash | Done |
@@ -104,6 +106,7 @@ Last updated: 2026-11-05 by Gemini 3.8 Flash (PLAN-0011 Addendum 1)
 - AI provider: open until Phase 5 (README 10.5).
 - UI kit (Tailwind + shadcn/ui proposed in docs/DESIGN.md): confirm at Phase 0, step 4.
 - Email sender: Brevo with a Gmail address as From will often land in spam (DMARC). Buy a domain and verify it in Brevo before public launch (no code change).
+- Supabase Storage is verified only against a fake server. Founder manual check (README D-100, plan 0012 section "Founder manual verification") is due before the Phase 1 deploy: create the private bucket, set local .env, upload and download a PDF.
 
 ## Blockers
 None.
@@ -114,6 +117,10 @@ None.
 - Keep it short. Details live in the plan files.
 
 ## Known gaps (not blockers)
+- Antivirus scanning of uploaded documents is not in v1 (D-100).
+- Orphan storage object sweeper is needed for aborted uploads/failures (D-100).
+- Portal document uploads are deferred to portal phase.
+- Document retention and deletion policies to be addressed with privacy work.
 - Access tokens stay valid up to 15 minutes after a password reset.
 - Outbox cleanup job for old SENT rows is needed.
 - Outbox worker holds its DB transaction while sending (claim, release, send, update later).

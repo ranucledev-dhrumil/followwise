@@ -47,7 +47,15 @@ public class LedgerPayloadParser {
         } catch (AppValidationException e) {
             throw new LedgerValidationException(e.getErrors());
         } catch (AppBadRequestException e) {
-            throw new LedgerBadRequestException(e.getMessage());
+            String msg = e.getMessage();
+            if ("missing payload".equals(msg)
+                    || "maximum nesting depth exceeded".equals(msg)
+                    || "invalid JSON syntax".equals(msg)
+                    || "request body must be a JSON object".equals(msg)
+                    || "unknown property in request envelope".equals(msg)) {
+                throw new LedgerBadRequestException(msg);
+            }
+            throw new LedgerBadRequestException("invalid request payload");
         }
     }
 

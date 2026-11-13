@@ -11,7 +11,10 @@ public enum Permission {
     EDIT_DATA(Set.of(Role.OWNER, Role.STAFF)),
     VIEW_LEDGER(Set.of(Role.OWNER, Role.STAFF)),
     RECORD_PAYMENT(Set.of(Role.OWNER, Role.STAFF)),
-    MANAGE_LEDGER(Set.of(Role.OWNER));
+    MANAGE_LEDGER(Set.of(Role.OWNER)),
+    VIEW_DOCUMENTS(Set.of(Role.OWNER, Role.STAFF)),
+    EDIT_DOCUMENTS(Set.of(Role.OWNER, Role.STAFF)),
+    MANAGE_DOCUMENTS(Set.of(Role.OWNER));
 
     private final Set<Role> grantedRoles;
 

@@ -14,6 +14,8 @@ public final class TestDbHelper {
         try (Connection conn = dataSource.getConnection();
              Statement stmt = conn.createStatement()) {
             stmt.execute("SET session_replication_role = replica");
+            stmt.execute("DELETE FROM documents");
+            stmt.execute("DELETE FROM document_requests");
             stmt.execute("DELETE FROM ledger_entries");
             stmt.execute("DELETE FROM parties");
             stmt.execute("DELETE FROM records");

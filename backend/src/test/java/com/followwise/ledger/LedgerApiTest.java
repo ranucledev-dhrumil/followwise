@@ -1490,4 +1490,33 @@ class LedgerApiTest extends AbstractIntegrationTest {
         });
         assertEquals(413, response.getStatus());
     }
+
+    @Test
+    void malformed_json_with_secret_marker_leak_prevention() throws Exception {
+        String malformedPayload = "{\"SECRET_MARKER_123\": malformed_syntax";
+
+        // 1. Create charge endpoint
+        mockMvc.perform(post("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/parties/" + tenant1Id + "/charges")
+                        .header("Authorization", "Bearer " + ownerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(malformedPayload))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().string(not(containsString("SECRET_MARKER_123"))));
+
+        // 2. Record payment endpoint
+        mockMvc.perform(post("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/charges/" + UUID.randomUUID() + "/payments")
+                        .header("Authorization", "Bearer " + ownerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(malformedPayload))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().string(not(containsString("SECRET_MARKER_123"))));
+
+        // 3. Reverse entry endpoint
+        mockMvc.perform(post("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/ledger/" + UUID.randomUUID() + "/reverse")
+                        .header("Authorization", "Bearer " + ownerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(malformedPayload))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().string(not(containsString("SECRET_MARKER_123"))));
+    }
 }

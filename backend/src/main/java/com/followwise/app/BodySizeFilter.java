@@ -25,6 +25,14 @@ public class BodySizeFilter extends OncePerRequestFilter {
     public static final int MAX_SIZE = 81920;
     public static final int DATA_MAX_SIZE = 32768;
     public static final int LEDGER_MAX_SIZE = 8192;
+    public static final int DOCUMENT_JSON_MAX_SIZE = 8192;
+
+    @org.springframework.beans.factory.annotation.Value("${app.max-document-bytes:4194304}")
+    private long maxDocumentBytes = 4194304;
+
+    public void setMaxDocumentBytes(long maxDocumentBytes) {
+        this.maxDocumentBytes = maxDocumentBytes;
+    }
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
@@ -32,7 +40,7 @@ public class BodySizeFilter extends OncePerRequestFilter {
         String uri = request.getRequestURI();
         String method = request.getMethod();
 
-        int limit = 0;
+        long limit = 0;
         boolean isAppTarget = (method.equalsIgnoreCase("POST") && uri.matches("^/api/workspaces/[^/]+/apps/?$"))
                 || (method.equalsIgnoreCase("PUT") && uri.matches("^/api/workspaces/[^/]+/apps/[^/]+/definition/?$"));
 
@@ -48,7 +56,21 @@ public class BodySizeFilter extends OncePerRequestFilter {
         boolean isGenerateTarget = method.equalsIgnoreCase("POST")
                 && uri.matches("^/api/workspaces/[^/]+/apps/[^/]+/charges/generate/?$");
 
-        if (isGenerateTarget) {
+        boolean isDocumentUploadTarget = method.equalsIgnoreCase("POST")
+                && uri.matches("^/api/workspaces/[^/]+/apps/[^/]+/document-requests/[^/]+/documents/?$");
+
+        boolean isDocumentJsonTarget = (method.equalsIgnoreCase("POST") && uri.matches("^/api/workspaces/[^/]+/apps/[^/]+/parties/[^/]+/document-requests/?$"))
+                || (method.equalsIgnoreCase("PUT") && uri.matches("^/api/workspaces/[^/]+/apps/[^/]+/document-requests/[^/]+/due-date/?$"))
+                || (method.equalsIgnoreCase("POST") && uri.matches("^/api/workspaces/[^/]+/apps/[^/]+/document-requests/[^/]+/approve/?$"))
+                || (method.equalsIgnoreCase("POST") && uri.matches("^/api/workspaces/[^/]+/apps/[^/]+/document-requests/[^/]+/reject/?$"))
+                || (method.equalsIgnoreCase("POST") && uri.matches("^/api/workspaces/[^/]+/apps/[^/]+/document-requests/[^/]+/cancel/?$"))
+                || (method.equalsIgnoreCase("POST") && uri.matches("^/api/workspaces/[^/]+/apps/[^/]+/document-requests/[^/]+/documents/[^/]+/purge/?$"));
+
+        if (isDocumentUploadTarget) {
+            limit = maxDocumentBytes;
+        } else if (isDocumentJsonTarget) {
+            limit = DOCUMENT_JSON_MAX_SIZE;
+        } else if (isGenerateTarget) {
             limit = 1024;
         } else if (isAppTarget) {
             limit = MAX_SIZE;
@@ -95,7 +117,7 @@ public class BodySizeFilter extends OncePerRequestFilter {
         write413(response, MAX_SIZE);
     }
 
-    public static void write413(HttpServletResponse response, int limit) throws IOException {
+    public static void write413(HttpServletResponse response, long limit) throws IOException {
         response.setStatus(HttpStatus.PAYLOAD_TOO_LARGE.value());
         response.setContentType("application/problem+json");
         response.setCharacterEncoding(StandardCharsets.UTF_8.name());
@@ -103,10 +125,10 @@ public class BodySizeFilter extends OncePerRequestFilter {
     }
 
     private static class BoundedSizeRequestWrapper extends HttpServletRequestWrapper {
-        private final int maxBytes;
+        private final long maxBytes;
         private CountingServletInputStream stream;
 
-        public BoundedSizeRequestWrapper(HttpServletRequest request, int maxBytes) {
+        public BoundedSizeRequestWrapper(HttpServletRequest request, long maxBytes) {
             super(request);
             this.maxBytes = maxBytes;
         }
@@ -131,10 +153,10 @@ public class BodySizeFilter extends OncePerRequestFilter {
 
     private static class CountingServletInputStream extends ServletInputStream {
         private final ServletInputStream delegate;
-        private final int maxBytes;
-        private int bytesRead = 0;
+        private final long maxBytes;
+        private long bytesRead = 0;
 
-        public CountingServletInputStream(ServletInputStream delegate, int maxBytes) {
+        public CountingServletInputStream(ServletInputStream delegate, long maxBytes) {
             this.delegate = delegate;
             this.maxBytes = maxBytes;
         }
