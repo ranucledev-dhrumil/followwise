@@ -1,6 +1,6 @@
 # PLAN-0013: Document workflow (approve, reject, due date, cancel, purge, filters)
 
-Status: DRAFT        <!-- DRAFT -> APPROVED (founder) -> IN PROGRESS -> DONE | BLOCKED -->
+Status: APPROVED        <!-- DRAFT -> APPROVED (founder) -> IN PROGRESS -> DONE | BLOCKED -->
 Phase / step: Phase 1, step 1e-ii
 Author: orchestrator   Executor: (model that executed)
 Branch: plan-0013 (created by the founder; AI models run no git). Starts only after PLAN-0012 is merged.
@@ -34,3 +34,8 @@ Tests (Testcontainers, fake storage, mutable Clock): every valid and invalid tra
 - Files changed (real paths, grouped by slice):
 - Deviations (list every one):
 - Final test counts (existing + new):
+
+## Orchestrator amendments (binding, override anything above that conflicts)
+A. NEW first slice (Slice 0): upload transaction scope. PLAN-0012 put @Transactional on the whole DocumentService.uploadDocument, which holds the app row lock and a database connection during the storage call and the semaphore wait (the production pool has 5 connections and up to 4 uploads run at once). Restructure it so that no transaction and no row lock exists during storage IO: (1) try-acquire the upload semaphore without waiting (429 busy with Retry-After 5 on failure, release in finally); (2) cheap checks outside any transaction: permission, request and party lookup scoped by workspace_id and app_id, status and archived rules, size, magic-byte detection, filename sanitization, SHA-256, and a pre-check that skips the put when the bytes equal the request's current document (return 200); (3) storage.put under a new random key; (4) one short transaction in a separate bean method or TransactionTemplate: lock app, then party, then request, repeat the archived and state checks, repeat the identical-bytes check (if now identical, delete the object and return 200), check every D-99 limit, insert the document, set current_document_id, version_no and status RECEIVED (clearing approved_at, expires_on, status_reason); (5) on any failure after the put, delete the object best effort and rethrow. All D-94 to D-100 behavior stays. Tests: while a fake storage put is blocked on a latch, a read endpoint, a party write, and a ledger write on the same app all complete (the app row can be locked with FOR UPDATE NOWAIT from a second connection); the limit and concurrent-version tests from PLAN-0012 still pass unchanged; a failing insert after put deletes the object; the identical-bytes race deletes the extra object; a blocked upload in progress does not stop a second upload for a different request from starting (up to the semaphore). Report the pool settings and how many connections an upload holds, and when.
+B. Every write method in DocumentService (assign and every workflow method in this plan) opens its transaction through a proxied bean method or TransactionTemplate before taking the app lock. In the report list each write method with its lock sequence and show the grep for @Transactional.
+C. Slice numbering: the plan's Slice 1 to 4 become Slice 1 to 4 after the new Slice 0. Everything else in this plan stays as written.
