@@ -60,10 +60,11 @@ public class BodySizeFilter extends OncePerRequestFilter {
                 && uri.matches("^/api/workspaces/[^/]+/apps/[^/]+/document-requests/[^/]+/documents/?$");
 
         boolean isDocumentJsonTarget = (method.equalsIgnoreCase("POST") && uri.matches("^/api/workspaces/[^/]+/apps/[^/]+/parties/[^/]+/document-requests/?$"))
-                || (method.equalsIgnoreCase("PUT") && uri.matches("^/api/workspaces/[^/]+/apps/[^/]+/document-requests/[^/]+/due-date/?$"))
+                || ((method.equalsIgnoreCase("POST") || method.equalsIgnoreCase("PUT")) && uri.matches("^/api/workspaces/[^/]+/apps/[^/]+/document-requests/[^/]+/due-date/?$"))
                 || (method.equalsIgnoreCase("POST") && uri.matches("^/api/workspaces/[^/]+/apps/[^/]+/document-requests/[^/]+/approve/?$"))
                 || (method.equalsIgnoreCase("POST") && uri.matches("^/api/workspaces/[^/]+/apps/[^/]+/document-requests/[^/]+/reject/?$"))
                 || (method.equalsIgnoreCase("POST") && uri.matches("^/api/workspaces/[^/]+/apps/[^/]+/document-requests/[^/]+/cancel/?$"))
+                || (method.equalsIgnoreCase("POST") && uri.matches("^/api/workspaces/[^/]+/apps/[^/]+/documents/[^/]+/purge/?$"))
                 || (method.equalsIgnoreCase("POST") && uri.matches("^/api/workspaces/[^/]+/apps/[^/]+/document-requests/[^/]+/documents/[^/]+/purge/?$"));
 
         if (isDocumentUploadTarget) {

@@ -69,6 +69,9 @@ Plan numbers are sequential, four digits.
 - Never commit secrets or `.env` files. Add new variables to `.env.example` with no values.
 - Do not collect highly sensitive identifiers (full SSNs, bank logins, health data) in v1.
 - Do not log personal data or document contents.
+- Rules files are the founder's: no model edits `AGENTS.md`, `docs/STATUS.md` rules sections, or any tool configuration, and no tool command that generates or rewrites rules files (for example an "init" command of any AI tool) may run in this repository.
+- Executors never download, install, or run software, installers, or binaries, and never save downloaded files anywhere in the repository. If a task seems to need a tool that is not installed, set `Status: BLOCKED` and say which one. Report every network access made.
+- Never leave binaries or archives in the repository folders. The founder keeps `*.exe`, `*.msi`, and `*.zip` out of git.
 
 ## 7. Git (founder only)
 - The founder runs every git command. AI models never run git (see section 2).

@@ -136,6 +136,9 @@ class DocumentApiTest extends AbstractIntegrationTest {
     @Autowired
     private BodySizeFilter bodySizeFilter;
 
+    @Autowired
+    private com.followwise.ledger.LedgerService ledgerService;
+
     private final JsonMapper jsonMapper = JsonMapper.builder().build();
 
     private UUID workspace1Id;
@@ -1212,5 +1215,1060 @@ class DocumentApiTest extends AbstractIntegrationTest {
         assertEquals(fakeStorageCountBefore, FAKE_STORAGE.size(), "Nothing should be stored in storage on 413");
         assertEquals(dbVersionsBefore, documentStore.countVersionsByRequest(workspace1Id, app1Id, reqChunked),
                 "No document record should be inserted in DB on 413");
+    }
+
+    @Test
+    void blocked_storage_put_holds_no_db_lock_and_allows_concurrent_app_activity() throws Exception {
+        var assignResp = documentService.assignChecklist(workspace1Id, app1Id, party1Id, ownerId, "onboarding_docs");
+        UUID req1 = assignResp.created().get(0).id();
+        UUID req2 = assignResp.created().get(1).id();
+
+        CountDownLatch enteredPut = new CountDownLatch(1);
+        CountDownLatch blockPut = new CountDownLatch(1);
+        FAKE_STORAGE.setPutLatches(enteredPut, blockPut);
+
+        AtomicInteger upload1Status = new AtomicInteger();
+        Thread uploadThread = new Thread(() -> {
+            try {
+                var res = mockMvc.perform(post("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/document-requests/" + req1 + "/documents")
+                                .header("Authorization", "Bearer " + ownerToken)
+                                .header("X-Filename", "first.pdf")
+                                .content(VALID_PDF))
+                        .andReturn();
+                upload1Status.set(res.getResponse().getStatus());
+            } catch (Exception e) {
+                upload1Status.set(500);
+            }
+        });
+        uploadThread.start();
+
+        // Wait until upload 1 is blocked inside storage.put
+        assertTrue(enteredPut.await(5, TimeUnit.SECONDS));
+
+        // 1. Read endpoint completes while storage put is blocked
+        mockMvc.perform(get("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/document-requests/" + req1)
+                        .header("Authorization", "Bearer " + ownerToken))
+                .andExpect(status().isOk());
+
+        // 2. Party write on same app completes while storage put is blocked
+        var createdParty = partyService.createParty(workspace1Id, app1Id, ownerId, "client",
+                jsonMapper.readTree("{\"name\": \"Concurrent Client\", \"email\": \"client@example.com\"}"));
+        assertNotNull(createdParty.id());
+
+        // 3. Ledger write on same app completes while storage put is blocked
+        var charge = ledgerService.createCharge(workspace1Id, app1Id, party1Id, ownerId,
+                "Rent", 10000, LocalDate.of(2026, 6, 15), null, UUID.randomUUID(), "/charges");
+        assertNotNull(charge.id());
+
+        // 4. App row can be locked with FOR UPDATE NOWAIT from a second connection
+        try (var conn = dataSource.getConnection()) {
+            conn.setAutoCommit(false);
+            try (var stmt = conn.prepareStatement("SELECT id FROM apps WHERE id = ? FOR UPDATE NOWAIT")) {
+                stmt.setObject(1, app1Id);
+                try (var rs = stmt.executeQuery()) {
+                    assertTrue(rs.next(), "App row lock with FOR UPDATE NOWAIT must succeed while storage put is blocked");
+                }
+            }
+            conn.rollback();
+        }
+
+        // 5. A second upload in progress for a different request starts (up to semaphore)
+        CountDownLatch enteredSecondPut = new CountDownLatch(1);
+        CountDownLatch blockSecondPut = new CountDownLatch(1);
+        FAKE_STORAGE.setPutLatches(enteredSecondPut, blockSecondPut);
+
+        AtomicInteger upload2Status = new AtomicInteger();
+        Thread upload2Thread = new Thread(() -> {
+            try {
+                var res = mockMvc.perform(post("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/document-requests/" + req2 + "/documents")
+                                .header("Authorization", "Bearer " + ownerToken)
+                                .header("X-Filename", "second.pdf")
+                                .content(VALID_PDF))
+                        .andReturn();
+                upload2Status.set(res.getResponse().getStatus());
+            } catch (Exception e) {
+                upload2Status.set(500);
+            }
+        });
+        upload2Thread.start();
+
+        assertTrue(enteredSecondPut.await(5, TimeUnit.SECONDS), "Second upload must start and reach storage.put");
+
+        // Unblock both storage puts
+        blockPut.countDown();
+        blockSecondPut.countDown();
+
+        uploadThread.join(5000);
+        upload2Thread.join(5000);
+
+        assertEquals(201, upload1Status.get());
+        assertEquals(201, upload2Status.get());
+    }
+
+    @Test
+    void identical_bytes_race_deletes_extra_storage_object() throws Exception {
+        var assignResp = documentService.assignChecklist(workspace1Id, app1Id, party1Id, ownerId, "onboarding_docs");
+        UUID reqId = assignResp.created().get(0).id();
+
+        // 1. Initial upload -> creates v1
+        mockMvc.perform(post("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/document-requests/" + reqId + "/documents")
+                        .header("Authorization", "Bearer " + ownerToken)
+                        .content(VALID_PDF))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.versionNo").value(1));
+
+        assertEquals(1, FAKE_STORAGE.size());
+        assertEquals(1, documentStore.countVersionsByRequest(workspace1Id, app1Id, reqId));
+
+        // 2. Upload identical bytes again -> skips put, returns 200, storage size remains 1
+        mockMvc.perform(post("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/document-requests/" + reqId + "/documents")
+                        .header("Authorization", "Bearer " + ownerToken)
+                        .content(VALID_PDF))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.versionNo").value(1));
+
+        assertEquals(1, FAKE_STORAGE.size());
+        assertEquals(1, documentStore.countVersionsByRequest(workspace1Id, app1Id, reqId));
+    }
+
+    @Test
+    void state_transitions_approve_reject_duedate_cancel() throws Exception {
+        var assignResp = documentService.assignChecklist(workspace1Id, app1Id, party1Id, ownerId, "onboarding_docs");
+        UUID req1 = assignResp.created().get(0).id(); // gov_id (expiryDays = 365)
+        UUID req2 = assignResp.created().get(1).id(); // tax_form (no expiryDays)
+
+        // 1. Cannot approve from PENDING -> 409 invalid_state
+        mockMvc.perform(post("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/document-requests/" + req1 + "/approve")
+                        .header("Authorization", "Bearer " + ownerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedVersion\": 1}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.type").value("invalid_state"));
+
+        // Upload to req1 -> RECEIVED (version becomes 2)
+        mockMvc.perform(post("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/document-requests/" + req1 + "/documents")
+                        .header("Authorization", "Bearer " + ownerToken)
+                        .content(VALID_PDF))
+                .andExpect(status().isCreated());
+
+        // Stale expectedVersion -> 409 stale_version with currentVersion
+        mockMvc.perform(post("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/document-requests/" + req1 + "/approve")
+                        .header("Authorization", "Bearer " + ownerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedVersion\": 1}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.type").value("stale_version"))
+                .andExpect(jsonPath("$.currentVersion").value(2));
+
+        // Approve req1 with default expires_on (today 2026-06-01 + 365 = 2027-06-01)
+        mockMvc.perform(post("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/document-requests/" + req1 + "/approve")
+                        .header("Authorization", "Bearer " + staffToken) // STAFF is allowed
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedVersion\": 2}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("APPROVED"))
+                .andExpect(jsonPath("$.expiresOn").value("2027-06-01"))
+                .andExpect(jsonPath("$.version").value(3));
+
+        // Approve twice -> 409 invalid_state
+        mockMvc.perform(post("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/document-requests/" + req1 + "/approve")
+                        .header("Authorization", "Bearer " + ownerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedVersion\": 3}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.type").value("invalid_state"));
+
+        // Upload to req2 -> RECEIVED (version becomes 2)
+        mockMvc.perform(post("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/document-requests/" + req2 + "/documents")
+                        .header("Authorization", "Bearer " + ownerToken)
+                        .content(VALID_PNG))
+                .andExpect(status().isCreated());
+
+        // Reject req2 with reason
+        mockMvc.perform(post("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/document-requests/" + req2 + "/reject")
+                        .header("Authorization", "Bearer " + staffToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedVersion\": 2, \"reason\": \"Blurry image, please re-upload\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("REJECTED"))
+                .andExpect(jsonPath("$.statusReason").value("Blurry image, please re-upload"))
+                .andExpect(jsonPath("$.version").value(3));
+
+        // Reject again from REJECTED -> 409 invalid_state
+        mockMvc.perform(post("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/document-requests/" + req2 + "/reject")
+                        .header("Authorization", "Bearer " + ownerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedVersion\": 3, \"reason\": \"still rejected\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.type").value("invalid_state"));
+
+        // Update due date
+        mockMvc.perform(post("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/document-requests/" + req2 + "/due-date")
+                        .header("Authorization", "Bearer " + staffToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedVersion\": 3, \"dueDate\": \"2026-07-01\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.dueDate").value("2026-07-01"))
+                .andExpect(jsonPath("$.version").value(4));
+
+        // Clear due date
+        mockMvc.perform(post("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/document-requests/" + req2 + "/due-date")
+                        .header("Authorization", "Bearer " + staffToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedVersion\": 4}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.dueDate").isEmpty())
+                .andExpect(jsonPath("$.version").value(5));
+
+        // Cancel req2: STAFF gets 403 (needs MANAGE_DOCUMENTS)
+        mockMvc.perform(post("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/document-requests/" + req2 + "/cancel")
+                        .header("Authorization", "Bearer " + staffToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedVersion\": 5}"))
+                .andExpect(status().isForbidden());
+
+        // Cancel req2: OWNER succeeds
+        mockMvc.perform(post("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/document-requests/" + req2 + "/cancel")
+                        .header("Authorization", "Bearer " + ownerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedVersion\": 5}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.version").value(6));
+
+        // Writes to cancelled request fail with 409 request_cancelled
+        mockMvc.perform(post("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/document-requests/" + req2 + "/due-date")
+                        .header("Authorization", "Bearer " + ownerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedVersion\": 6, \"dueDate\": \"2026-08-01\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.type").value("request_cancelled"));
+
+        mockMvc.perform(post("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/document-requests/" + req2 + "/documents")
+                        .header("Authorization", "Bearer " + ownerToken)
+                        .content(VALID_PDF))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.type").value("request_cancelled"));
+
+        // Cancel frees unique slot: assigning checklist again creates new request for tax_form
+        var assignResp2 = documentService.assignChecklist(workspace1Id, app1Id, party1Id, ownerId, "onboarding_docs");
+        assertEquals(1, assignResp2.created().size(), "Should recreate the cancelled item");
+        assertEquals("tax_form", assignResp2.created().get(0).itemId());
+    }
+
+    @Test
+    void purge_document_rules_and_storage_deletion() throws Exception {
+        var assignResp = documentService.assignChecklist(workspace1Id, app1Id, party1Id, ownerId, "onboarding_docs");
+        UUID reqId = assignResp.created().get(0).id();
+
+        // Upload version 1
+        var res1 = mockMvc.perform(post("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/document-requests/" + reqId + "/documents")
+                        .header("Authorization", "Bearer " + ownerToken)
+                        .content(VALID_PDF))
+                .andExpect(status().isCreated())
+                .andReturn();
+        UUID doc1Id = UUID.fromString(jsonMapper.readTree(res1.getResponse().getContentAsString()).get("id").asText());
+
+        // 1. Purge current version -> 409 current_document
+        mockMvc.perform(post("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/documents/" + doc1Id + "/purge")
+                        .header("Authorization", "Bearer " + ownerToken))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.type").value("current_document"));
+
+        // Upload version 2 -> doc1 is now non-current
+        var res2 = mockMvc.perform(post("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/document-requests/" + reqId + "/documents")
+                        .header("Authorization", "Bearer " + ownerToken)
+                        .content(VALID_PNG))
+                .andExpect(status().isCreated())
+                .andReturn();
+        UUID doc2Id = UUID.fromString(jsonMapper.readTree(res2.getResponse().getContentAsString()).get("id").asText());
+
+        // 2. STAFF cannot purge -> 403 (needs MANAGE_DOCUMENTS)
+        mockMvc.perform(post("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/documents/" + doc1Id + "/purge")
+                        .header("Authorization", "Bearer " + staffToken))
+                .andExpect(status().isForbidden());
+
+        // 3. OWNER purges non-current doc1 -> succeeds (200 OK)
+        mockMvc.perform(post("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/documents/" + doc1Id + "/purge")
+                        .header("Authorization", "Bearer " + ownerToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.purgedAt").isNotEmpty());
+
+        // 4. Stored object in FAKE_STORAGE is gone
+        assertFalse(FAKE_STORAGE.containsKey(workspace1Id + "/" + app1Id + "/" + doc1Id));
+
+        // 5. Document row remains with purged_at set and storage_key null
+        var doc1 = documentStore.findById(workspace1Id, app1Id, doc1Id).orElseThrow();
+        assertNotNull(doc1.purgedAt());
+        assertNull(doc1.storageKey());
+
+        // 6. Download of purged document returns 410 gone
+        mockMvc.perform(get("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/documents/" + doc1Id + "/download")
+                        .header("Authorization", "Bearer " + ownerToken))
+                .andExpect(status().isGone())
+                .andExpect(jsonPath("$.detail").value("gone"));
+
+        // 7. Second purge returns 409 already_purged
+        mockMvc.perform(post("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/documents/" + doc1Id + "/purge")
+                        .header("Authorization", "Bearer " + ownerToken))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.type").value("already_purged"));
+
+        // 8. Failing storage delete does not revert the purge
+        // Upload version 3 so doc2 is now non-current
+        mockMvc.perform(post("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/document-requests/" + reqId + "/documents")
+                        .header("Authorization", "Bearer " + ownerToken)
+                        .content(VALID_JPEG))
+                .andExpect(status().isCreated());
+
+        FAKE_STORAGE.setFailing(true);
+        try {
+            mockMvc.perform(post("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/documents/" + doc2Id + "/purge")
+                            .header("Authorization", "Bearer " + ownerToken))
+                    .andExpect(status().isOk());
+
+            // Purge succeeded in DB despite storage failure
+            var doc2 = documentStore.findById(workspace1Id, app1Id, doc2Id).orElseThrow();
+            assertNotNull(doc2.purgedAt());
+            assertNull(doc2.storageKey());
+        } finally {
+            FAKE_STORAGE.setFailing(false);
+        }
+    }
+
+    @Test
+    void derived_filters_and_pagination() throws Exception {
+        // Assign onboarding_docs to party1Id
+        var assignResp = documentService.assignChecklist(workspace1Id, app1Id, party1Id, ownerId, "onboarding_docs");
+        UUID govId = assignResp.created().get(0).id(); // gov_id (expiryDays = 365, required=true)
+        UUID taxForm = assignResp.created().get(1).id(); // tax_form (expiryDays = null, required=true)
+
+        // 1. Initial state: all are PENDING
+        // Verify default GET .../document-requests returns all 3, sorted by due_date ASC NULLS LAST, id ASC
+        mockMvc.perform(get("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/document-requests")
+                        .header("Authorization", "Bearer " + ownerToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items.length()").value(3))
+                .andExpect(jsonPath("$.page").value(0))
+                .andExpect(jsonPath("$.size").value(20))
+                .andExpect(jsonPath("$.total").value(3));
+
+        // 2. Filter validation: invalid status -> 400
+        mockMvc.perform(get("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/document-requests?status=unknown")
+                        .header("Authorization", "Bearer " + ownerToken))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.detail").value("Invalid status filter: unknown"));
+
+        // Invalid expiringWithinDays -> 400 (boundary 366)
+        mockMvc.perform(get("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/document-requests?expiringWithinDays=366")
+                        .header("Authorization", "Bearer " + ownerToken))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.detail").value("expiringWithinDays must be between 0 and 365"));
+
+        // Boundary expiringWithinDays = 0 and 365 are allowed
+        mockMvc.perform(get("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/document-requests?expiringWithinDays=0")
+                        .header("Authorization", "Bearer " + ownerToken))
+                .andExpect(status().isOk());
+        mockMvc.perform(get("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/document-requests?expiringWithinDays=365")
+                        .header("Authorization", "Bearer " + ownerToken))
+                .andExpect(status().isOk());
+
+        // 3. Test overdue logic:
+        // Set govId dueDate to yesterday -> overdue should be true
+        // Set taxForm dueDate to today -> overdue should be false (due today is NOT overdue)
+        LocalDate today = LocalDate.ofInstant(MUTABLE_CLOCK.instant(), ZoneId.of("UTC"));
+        mockMvc.perform(post("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/document-requests/" + govId + "/due-date")
+                        .header("Authorization", "Bearer " + ownerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedVersion\": 1, \"dueDate\": \"" + today.minusDays(1) + "\"}"))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/document-requests/" + taxForm + "/due-date")
+                        .header("Authorization", "Bearer " + ownerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedVersion\": 1, \"dueDate\": \"" + today + "\"}"))
+                .andExpect(status().isOk());
+
+        // Check single GET shows overdue boolean correctly
+        mockMvc.perform(get("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/document-requests/" + govId)
+                        .header("Authorization", "Bearer " + ownerToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.overdue").value(true))
+                .andExpect(jsonPath("$.expired").value(false));
+
+        mockMvc.perform(get("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/document-requests/" + taxForm)
+                        .header("Authorization", "Bearer " + ownerToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.overdue").value(false))
+                .andExpect(jsonPath("$.expired").value(false));
+
+        // Filter overdue=true -> returns only govId
+        mockMvc.perform(get("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/document-requests?overdue=true")
+                        .header("Authorization", "Bearer " + ownerToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items.length()").value(1))
+                .andExpect(jsonPath("$.items[0].id").value(govId.toString()));
+
+        // Filter overdue=false -> returns non-overdue (taxForm + proof_of_address = 2)
+        mockMvc.perform(get("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/document-requests?overdue=false")
+                        .header("Authorization", "Bearer " + ownerToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items.length()").value(2));
+
+        // 4. Test expired and expiringWithinDays logic:
+        // Upload and approve govId with expiresOn = today - 1 (yesterday) -> expired = true
+        mockMvc.perform(post("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/document-requests/" + govId + "/documents")
+                        .header("Authorization", "Bearer " + ownerToken)
+                        .content(VALID_PNG))
+                .andExpect(status().isCreated());
+        mockMvc.perform(post("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/document-requests/" + govId + "/approve")
+                        .header("Authorization", "Bearer " + ownerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedVersion\": 3, \"expiresOn\": \"" + today.minusDays(1) + "\"}"))
+                .andExpect(status().isOk());
+
+        // Upload and approve taxForm with expiresOn = today -> expiring on today is expiring, not expired
+        mockMvc.perform(post("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/document-requests/" + taxForm + "/documents")
+                        .header("Authorization", "Bearer " + ownerToken)
+                        .content(VALID_PDF))
+                .andExpect(status().isCreated());
+        mockMvc.perform(post("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/document-requests/" + taxForm + "/approve")
+                        .header("Authorization", "Bearer " + ownerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedVersion\": 3, \"expiresOn\": \"" + today + "\"}"))
+                .andExpect(status().isOk());
+
+        // GET single check
+        mockMvc.perform(get("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/document-requests/" + govId)
+                        .header("Authorization", "Bearer " + ownerToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("APPROVED"))
+                .andExpect(jsonPath("$.expired").value(true))
+                .andExpect(jsonPath("$.overdue").value(false));
+
+        mockMvc.perform(get("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/document-requests/" + taxForm)
+                        .header("Authorization", "Bearer " + ownerToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("APPROVED"))
+                .andExpect(jsonPath("$.expired").value(false))
+                .andExpect(jsonPath("$.overdue").value(false));
+
+        // Filter status=expired -> returns govId only
+        mockMvc.perform(get("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/document-requests?status=expired")
+                        .header("Authorization", "Bearer " + ownerToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items.length()").value(1))
+                .andExpect(jsonPath("$.items[0].id").value(govId.toString()));
+
+        // Filter expiringWithinDays=0 -> taxForm expiresOn=today, so today <= expiresOn <= today+0 -> matches taxForm!
+        mockMvc.perform(get("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/document-requests?expiringWithinDays=0")
+                        .header("Authorization", "Bearer " + ownerToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items.length()").value(1))
+                .andExpect(jsonPath("$.items[0].id").value(taxForm.toString()));
+
+        // Filter partyId
+        mockMvc.perform(get("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/document-requests?partyId=" + party1Id)
+                        .header("Authorization", "Bearer " + ownerToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items.length()").value(3));
+
+        // 5. Test cancelled status filter
+        // Cancel taxForm
+        mockMvc.perform(post("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/document-requests/" + taxForm + "/cancel")
+                        .header("Authorization", "Bearer " + ownerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedVersion\": 4}"))
+                .andExpect(status().isOk());
+
+        // Listing without status=cancelled excludes cancelled requests (govId + proof_of_address = 2)
+        mockMvc.perform(get("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/document-requests")
+                        .header("Authorization", "Bearer " + ownerToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items.length()").value(2));
+
+        // Listing with status=cancelled returns cancelled request
+        mockMvc.perform(get("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/document-requests?status=cancelled")
+                        .header("Authorization", "Bearer " + ownerToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items.length()").value(1))
+                .andExpect(jsonPath("$.items[0].id").value(taxForm.toString()));
+    }
+
+    @Test
+    void purge_storage_failure_and_non_blocking() throws Exception {
+        var assignResp = documentService.assignChecklist(workspace1Id, app1Id, party1Id, ownerId, "onboarding_docs");
+        UUID reqId = assignResp.created().get(0).id();
+
+        // Upload v1 and v2
+        var res1 = mockMvc.perform(post("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/document-requests/" + reqId + "/documents")
+                        .header("Authorization", "Bearer " + ownerToken)
+                        .content(VALID_PDF))
+                .andExpect(status().isCreated())
+                .andReturn();
+        UUID doc1Id = UUID.fromString(jsonMapper.readTree(res1.getResponse().getContentAsString()).get("id").asText());
+
+        var res2 = mockMvc.perform(post("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/document-requests/" + reqId + "/documents")
+                        .header("Authorization", "Bearer " + ownerToken)
+                        .content(VALID_PNG))
+                .andExpect(status().isCreated())
+                .andReturn();
+        UUID doc2Id = UUID.fromString(jsonMapper.readTree(res2.getResponse().getContentAsString()).get("id").asText());
+
+        // Upload v3 so doc2 also becomes non-current
+        mockMvc.perform(post("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/document-requests/" + reqId + "/documents")
+                        .header("Authorization", "Bearer " + ownerToken)
+                        .content(VALID_JPEG))
+                .andExpect(status().isCreated());
+
+        // 1. Purge succeeds when the fake storage delete throws
+        FAKE_STORAGE.setDeleteFailing(true);
+        try {
+            mockMvc.perform(post("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/documents/" + doc1Id + "/purge")
+                            .header("Authorization", "Bearer " + ownerToken))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.purgedAt").isNotEmpty());
+
+            var doc1 = documentStore.findById(workspace1Id, app1Id, doc1Id).orElseThrow();
+            assertNotNull(doc1.purgedAt());
+            assertNull(doc1.storageKey());
+        } finally {
+            FAKE_STORAGE.setDeleteFailing(false);
+        }
+
+        // 2. While a fake storage delete is blocked on a latch, the app row can be locked with FOR UPDATE NOWAIT from a second connection
+        CountDownLatch enteredDelete = new CountDownLatch(1);
+        CountDownLatch blockDelete = new CountDownLatch(1);
+        FAKE_STORAGE.setDeleteLatches(enteredDelete, blockDelete);
+
+        AtomicInteger purgeStatus = new AtomicInteger();
+        Thread purgeThread = new Thread(() -> {
+            try {
+                var res = mockMvc.perform(post("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/documents/" + doc2Id + "/purge")
+                                .header("Authorization", "Bearer " + ownerToken))
+                        .andReturn();
+                purgeStatus.set(res.getResponse().getStatus());
+            } catch (Exception e) {
+                purgeStatus.set(500);
+            }
+        });
+        purgeThread.start();
+
+        // Wait until purge has committed DB transaction and entered storage delete
+        assertTrue(enteredDelete.await(5, TimeUnit.SECONDS), "Purge must reach storage.delete");
+
+        // The app row can be locked with FOR UPDATE NOWAIT from a second connection
+        try (var conn = dataSource.getConnection()) {
+            conn.setAutoCommit(false);
+            try (var stmt = conn.prepareStatement("SELECT id FROM apps WHERE id = ? FOR UPDATE NOWAIT")) {
+                stmt.setObject(1, app1Id);
+                try (var rs = stmt.executeQuery()) {
+                    assertTrue(rs.next(), "App row lock with FOR UPDATE NOWAIT must succeed while storage delete is blocked");
+                }
+            }
+            conn.rollback();
+        }
+
+        // Unblock storage delete
+        blockDelete.countDown();
+        purgeThread.join(5000);
+        assertEquals(200, purgeStatus.get());
+
+        var doc2 = documentStore.findById(workspace1Id, app1Id, doc2Id).orElseThrow();
+        assertNotNull(doc2.purgedAt());
+        assertNull(doc2.storageKey());
+    }
+
+    @Test
+    void permission_matrix_and_scoping_rules() throws Exception {
+        var assignResp = documentService.assignChecklist(workspace1Id, app1Id, party1Id, ownerId, "onboarding_docs");
+        UUID reqId = assignResp.created().get(0).id(); // version 1
+
+        // Upload doc so req is RECEIVED (version 2)
+        var upRes = mockMvc.perform(post("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/document-requests/" + reqId + "/documents")
+                        .header("Authorization", "Bearer " + ownerToken)
+                        .content(VALID_PDF))
+                .andExpect(status().isCreated())
+                .andReturn();
+        UUID doc1Id = UUID.fromString(jsonMapper.readTree(upRes.getResponse().getContentAsString()).get("id").asText());
+
+        // 1. Non-member gets 404 (D-42)
+        mockMvc.perform(post("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/document-requests/" + reqId + "/approve")
+                        .header("Authorization", "Bearer " + nonMemberToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedVersion\": 2}"))
+                .andExpect(status().isNotFound());
+
+        // 2. Portal user gets 403
+        mockMvc.perform(post("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/document-requests/" + reqId + "/approve")
+                        .header("Authorization", "Bearer " + portalToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedVersion\": 2}"))
+                .andExpect(status().isForbidden());
+
+        mockMvc.perform(post("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/document-requests/" + reqId + "/reject")
+                        .header("Authorization", "Bearer " + portalToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedVersion\": 2, \"reason\": \"no\"}"))
+                .andExpect(status().isForbidden());
+
+        mockMvc.perform(post("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/document-requests/" + reqId + "/due-date")
+                        .header("Authorization", "Bearer " + portalToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedVersion\": 2, \"dueDate\": \"2026-07-01\"}"))
+                .andExpect(status().isForbidden());
+
+        // 3. STAFF may approve, reject and change due date, but gets 403 on cancel and purge
+        mockMvc.perform(post("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/document-requests/" + reqId + "/cancel")
+                        .header("Authorization", "Bearer " + staffToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedVersion\": 2}"))
+                .andExpect(status().isForbidden());
+
+        mockMvc.perform(post("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/documents/" + doc1Id + "/purge")
+                        .header("Authorization", "Bearer " + staffToken))
+                .andExpect(status().isForbidden());
+
+        // 4. Scoping: ids from another app or workspace give 404
+        UUID fakeWorkspace = UUID.randomUUID();
+        mockMvc.perform(post("/api/workspaces/" + fakeWorkspace + "/apps/" + app1Id + "/document-requests/" + reqId + "/cancel")
+                        .header("Authorization", "Bearer " + ownerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedVersion\": 2}"))
+                .andExpect(status().isNotFound());
+
+        mockMvc.perform(post("/api/workspaces/" + workspace1Id + "/apps/" + app2Id + "/document-requests/" + reqId + "/cancel")
+                        .header("Authorization", "Bearer " + ownerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedVersion\": 2}"))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void secret_marker_leak_prevention_on_workflow_endpoints() throws Exception {
+        var assignResp = documentService.assignChecklist(workspace1Id, app1Id, party1Id, ownerId, "onboarding_docs");
+        UUID reqId = assignResp.created().get(0).id();
+
+        // 1. Reject with marker in reason
+        mockMvc.perform(post("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/document-requests/" + reqId + "/reject")
+                        .header("Authorization", "Bearer " + staffToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedVersion\": 1, \"reason\": \"SECRET_MARKER_123 <bad>\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(result -> {
+                    String body = result.getResponse().getContentAsString();
+                    assertFalse(body.contains("SECRET_MARKER_123"), "Body must not leak SECRET_MARKER_123");
+                });
+
+        // 2. Due date with marker
+        mockMvc.perform(post("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/document-requests/" + reqId + "/due-date")
+                        .header("Authorization", "Bearer " + staffToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedVersion\": 1, \"dueDate\": \"SECRET_MARKER_123\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(result -> {
+                    String body = result.getResponse().getContentAsString();
+                    assertFalse(body.contains("SECRET_MARKER_123"), "Body must not leak SECRET_MARKER_123");
+                });
+
+        // 3. Approve with marker in expiresOn
+        mockMvc.perform(post("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/document-requests/" + reqId + "/approve")
+                        .header("Authorization", "Bearer " + staffToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedVersion\": 1, \"expiresOn\": \"SECRET_MARKER_123\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(result -> {
+                    String body = result.getResponse().getContentAsString();
+                    assertFalse(body.contains("SECRET_MARKER_123"), "Body must not leak SECRET_MARKER_123");
+                });
+    }
+
+    @Test
+    void stale_expected_version_on_mutations() throws Exception {
+        var assignResp = documentService.assignChecklist(workspace1Id, app1Id, party1Id, ownerId, "onboarding_docs");
+        UUID reqId = assignResp.created().get(0).id(); // version 1
+
+        // Upload so it's in RECEIVED state (version becomes 2)
+        mockMvc.perform(post("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/document-requests/" + reqId + "/documents")
+                        .header("Authorization", "Bearer " + ownerToken)
+                        .content(VALID_PDF))
+                .andExpect(status().isCreated());
+
+        // Try approve with stale expectedVersion=1 -> 409 stale_version with currentVersion 2
+        mockMvc.perform(post("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/document-requests/" + reqId + "/approve")
+                        .header("Authorization", "Bearer " + staffToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedVersion\": 1}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.type").value("stale_version"))
+                .andExpect(jsonPath("$.currentVersion").value(2));
+
+        // Try reject with stale expectedVersion=1
+        mockMvc.perform(post("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/document-requests/" + reqId + "/reject")
+                        .header("Authorization", "Bearer " + staffToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedVersion\": 1, \"reason\": \"Bad document\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.type").value("stale_version"))
+                .andExpect(jsonPath("$.currentVersion").value(2));
+
+        // Try due-date with stale expectedVersion=1
+        mockMvc.perform(post("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/document-requests/" + reqId + "/due-date")
+                        .header("Authorization", "Bearer " + staffToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedVersion\": 1, \"dueDate\": \"2026-07-01\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.type").value("stale_version"))
+                .andExpect(jsonPath("$.currentVersion").value(2));
+
+        // Try cancel with stale expectedVersion=1
+        mockMvc.perform(post("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/document-requests/" + reqId + "/cancel")
+                        .header("Authorization", "Bearer " + ownerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedVersion\": 1}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.type").value("stale_version"))
+                .andExpect(jsonPath("$.currentVersion").value(2));
+    }
+
+    @Test
+    void concurrent_approve_and_concurrent_approve_reject() throws Exception {
+        var assignResp = documentService.assignChecklist(workspace1Id, app1Id, party1Id, ownerId, "onboarding_docs");
+        UUID req1 = assignResp.created().get(0).id(); // version 1
+        UUID req2 = assignResp.created().get(1).id(); // version 1
+
+        // Upload to req1 and req2 -> both RECEIVED (version 2)
+        mockMvc.perform(post("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/document-requests/" + req1 + "/documents")
+                        .header("Authorization", "Bearer " + ownerToken)
+                        .content(VALID_PDF))
+                .andExpect(status().isCreated());
+
+        mockMvc.perform(post("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/document-requests/" + req2 + "/documents")
+                        .header("Authorization", "Bearer " + ownerToken)
+                        .content(VALID_PNG))
+                .andExpect(status().isCreated());
+
+        // 1. Two concurrent approvals on req1 -> exactly one success, one conflict
+        AtomicInteger successApprove = new AtomicInteger();
+        AtomicInteger conflictApprove = new AtomicInteger();
+        CountDownLatch startLatch1 = new CountDownLatch(1);
+        CountDownLatch doneLatch1 = new CountDownLatch(2);
+
+        Runnable approveAction = () -> {
+            try {
+                startLatch1.await();
+                int st = mockMvc.perform(post("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/document-requests/" + req1 + "/approve")
+                                .header("Authorization", "Bearer " + ownerToken)
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content("{\"expectedVersion\": 2}"))
+                        .andReturn().getResponse().getStatus();
+                if (st == 200) successApprove.incrementAndGet();
+                else if (st == 409) conflictApprove.incrementAndGet();
+            } catch (Exception ignored) {
+            } finally {
+                doneLatch1.countDown();
+            }
+        };
+
+        new Thread(approveAction).start();
+        new Thread(approveAction).start();
+        startLatch1.countDown();
+        assertTrue(doneLatch1.await(5, TimeUnit.SECONDS));
+
+        assertEquals(1, successApprove.get());
+        assertEquals(1, conflictApprove.get());
+
+        // 2. Concurrent approve and reject on req2 -> exactly one success, one conflict
+        AtomicInteger successMixed = new AtomicInteger();
+        AtomicInteger conflictMixed = new AtomicInteger();
+        CountDownLatch startLatch2 = new CountDownLatch(1);
+        CountDownLatch doneLatch2 = new CountDownLatch(2);
+
+        new Thread(() -> {
+            try {
+                startLatch2.await();
+                int st = mockMvc.perform(post("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/document-requests/" + req2 + "/approve")
+                                .header("Authorization", "Bearer " + ownerToken)
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content("{\"expectedVersion\": 2}"))
+                        .andReturn().getResponse().getStatus();
+                if (st == 200) successMixed.incrementAndGet();
+                else if (st == 409) conflictMixed.incrementAndGet();
+            } catch (Exception ignored) {
+            } finally {
+                doneLatch2.countDown();
+            }
+        }).start();
+
+        new Thread(() -> {
+            try {
+                startLatch2.await();
+                int st = mockMvc.perform(post("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/document-requests/" + req2 + "/reject")
+                                .header("Authorization", "Bearer " + ownerToken)
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content("{\"expectedVersion\": 2, \"reason\": \"concurrent reject\"}"))
+                        .andReturn().getResponse().getStatus();
+                if (st == 200) successMixed.incrementAndGet();
+                else if (st == 409) conflictMixed.incrementAndGet();
+            } catch (Exception ignored) {
+            } finally {
+                doneLatch2.countDown();
+            }
+        }).start();
+
+        startLatch2.countDown();
+        assertTrue(doneLatch2.await(5, TimeUnit.SECONDS));
+
+        assertEquals(1, successMixed.get());
+        assertEquals(1, conflictMixed.get());
+    }
+
+    @Test
+    void expires_on_rules_and_reject_reason_rules() throws Exception {
+        var assignResp = documentService.assignChecklist(workspace1Id, app1Id, party1Id, ownerId, "onboarding_docs");
+        UUID govId = assignResp.created().get(0).id(); // expiryDays = 365
+        UUID taxForm = assignResp.created().get(1).id(); // expiryDays = null
+
+        mockMvc.perform(post("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/document-requests/" + govId + "/documents")
+                        .header("Authorization", "Bearer " + ownerToken)
+                        .content(VALID_PDF))
+                .andExpect(status().isCreated());
+
+        mockMvc.perform(post("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/document-requests/" + taxForm + "/documents")
+                        .header("Authorization", "Bearer " + ownerToken)
+                        .content(VALID_PNG))
+                .andExpect(status().isCreated());
+
+        // 1. Explicit expiresOn within bounds
+        mockMvc.perform(post("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/document-requests/" + govId + "/approve")
+                        .header("Authorization", "Bearer " + ownerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedVersion\": 2, \"expiresOn\": \"2028-12-31\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.expiresOn").value("2028-12-31"));
+
+        // 2. Explicit expiresOn before 2000-01-01 -> 400
+        mockMvc.perform(post("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/document-requests/" + taxForm + "/approve")
+                        .header("Authorization", "Bearer " + ownerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedVersion\": 2, \"expiresOn\": \"1999-12-31\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.detail").value("expiresOn must not be before 2000-01-01"));
+
+        // 3. Explicit expiresOn > 20 years in future -> 400
+        LocalDate today = LocalDate.ofInstant(MUTABLE_CLOCK.instant(), ZoneId.of("UTC"));
+        mockMvc.perform(post("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/document-requests/" + taxForm + "/approve")
+                        .header("Authorization", "Bearer " + ownerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedVersion\": 2, \"expiresOn\": \"" + today.plusYears(20).plusDays(1) + "\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.detail").value("expiresOn must not be more than 20 years in future"));
+
+        // 4. Default when expiryDays is null -> null expiresOn
+        mockMvc.perform(post("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/document-requests/" + taxForm + "/approve")
+                        .header("Authorization", "Bearer " + ownerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedVersion\": 2}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.expiresOn").isEmpty());
+
+        // 5. Reject reason rules: empty or blank -> 400
+        // Upload v2 to taxForm to put it back in RECEIVED
+        mockMvc.perform(post("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/document-requests/" + taxForm + "/documents")
+                        .header("Authorization", "Bearer " + ownerToken)
+                        .content(VALID_JPEG))
+                .andExpect(status().isCreated());
+
+        mockMvc.perform(post("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/document-requests/" + taxForm + "/reject")
+                        .header("Authorization", "Bearer " + ownerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedVersion\": 4, \"reason\": \"\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.detail").value("reason must be 1 to 200 characters"));
+
+        // Reason > 200 chars -> 400
+        String longReason = "a".repeat(201);
+        mockMvc.perform(post("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/document-requests/" + taxForm + "/reject")
+                        .header("Authorization", "Bearer " + ownerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedVersion\": 4, \"reason\": \"" + longReason + "\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.detail").value("reason must be 1 to 200 characters"));
+
+        // Reason with angle brackets -> 400
+        mockMvc.perform(post("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/document-requests/" + taxForm + "/reject")
+                        .header("Authorization", "Bearer " + ownerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedVersion\": 4, \"reason\": \"<script>alert(1)</script>\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.detail").value("reason contains forbidden characters"));
+    }
+
+    @Test
+    void due_date_limits_and_clearing() throws Exception {
+        var assignResp = documentService.assignChecklist(workspace1Id, app1Id, party1Id, ownerId, "onboarding_docs");
+        UUID reqId = assignResp.created().get(0).id(); // version 1
+        LocalDate today = LocalDate.ofInstant(MUTABLE_CLOCK.instant(), ZoneId.of("UTC"));
+
+        // 1. Due date > 5 years past -> 400
+        mockMvc.perform(post("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/document-requests/" + reqId + "/due-date")
+                        .header("Authorization", "Bearer " + ownerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedVersion\": 1, \"dueDate\": \"" + today.minusYears(5).minusDays(1) + "\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.detail").value("dueDate must be within 5 years before and after today"));
+
+        // 2. Due date > 5 years future -> 400
+        mockMvc.perform(post("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/document-requests/" + reqId + "/due-date")
+                        .header("Authorization", "Bearer " + ownerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedVersion\": 1, \"dueDate\": \"" + today.plusYears(5).plusDays(1) + "\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.detail").value("dueDate must be within 5 years before and after today"));
+
+        // 3. Clear due date with null
+        mockMvc.perform(post("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/document-requests/" + reqId + "/due-date")
+                        .header("Authorization", "Bearer " + ownerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedVersion\": 1, \"dueDate\": null}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.dueDate").isEmpty())
+                .andExpect(jsonPath("$.version").value(2));
+    }
+
+    @Test
+    void cross_timezone_date_line_filters() throws Exception {
+        // App 1 in America/New_York (UTC-4/-5) and another app in Pacific/Auckland (UTC+12/+13)
+        // Clock is 2026-06-01T23:30:00Z:
+        // In America/New_York (EDT, UTC-4), local time is 2026-06-01T19:30:00 -> today is 2026-06-01
+        // In Pacific/Auckland (NZST, UTC+12), local time is 2026-06-02T11:30:00 -> today is 2026-06-02
+        MUTABLE_CLOCK.setInstant(Instant.parse("2026-06-01T23:30:00Z"));
+
+        AppResponse nyApp = appService.createApp(workspace1Id, ownerId,
+                new AppPayloadParser.ParsedCreateAppRequest("client-document-tracker", "NY App", "America/New_York"));
+        AppResponse auckApp = appService.createApp(workspace1Id, ownerId,
+                new AppPayloadParser.ParsedCreateAppRequest("client-document-tracker", "Auckland App", "Pacific/Auckland"));
+
+        var nyParty = partyService.createParty(workspace1Id, nyApp.id(), ownerId, "client",
+                jsonMapper.readTree("{\"name\": \"NY Client\", \"email\": \"ny@example.com\"}"));
+        var auckParty = partyService.createParty(workspace1Id, auckApp.id(), ownerId, "client",
+                jsonMapper.readTree("{\"name\": \"Auck Client\", \"email\": \"auck@example.com\"}"));
+
+        var nyAssign = documentService.assignChecklist(workspace1Id, nyApp.id(), nyParty.id(), ownerId, "onboarding_docs");
+        var auckAssign = documentService.assignChecklist(workspace1Id, auckApp.id(), auckParty.id(), ownerId, "onboarding_docs");
+
+        UUID nyReq = nyAssign.created().get(0).id();
+        UUID auckReq = auckAssign.created().get(0).id();
+
+        // Set both due_date to 2026-06-02:
+        // For NY App, today is 2026-06-01 -> due_date 2026-06-02 is tomorrow -> NOT overdue!
+        mockMvc.perform(post("/api/workspaces/" + workspace1Id + "/apps/" + nyApp.id() + "/document-requests/" + nyReq + "/due-date")
+                        .header("Authorization", "Bearer " + ownerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedVersion\": 1, \"dueDate\": \"2026-06-02\"}"))
+                .andExpect(status().isOk());
+
+        // For Auckland App, today is 2026-06-02 -> due_date 2026-06-02 is today -> NOT overdue (due today is NOT overdue)!
+        mockMvc.perform(post("/api/workspaces/" + workspace1Id + "/apps/" + auckApp.id() + "/document-requests/" + auckReq + "/due-date")
+                        .header("Authorization", "Bearer " + ownerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedVersion\": 1, \"dueDate\": \"2026-06-02\"}"))
+                .andExpect(status().isOk());
+
+        // Now set due_date to 2026-06-01:
+        // For Auckland App (today 2026-06-02), due_date 2026-06-01 is yesterday -> OVERDUE!
+        mockMvc.perform(post("/api/workspaces/" + workspace1Id + "/apps/" + auckApp.id() + "/document-requests/" + auckReq + "/due-date")
+                        .header("Authorization", "Bearer " + ownerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedVersion\": 2, \"dueDate\": \"2026-06-01\"}"))
+                .andExpect(status().isOk());
+
+        // For NY App (today 2026-06-01), due_date 2026-06-01 is today -> NOT overdue!
+        mockMvc.perform(post("/api/workspaces/" + workspace1Id + "/apps/" + nyApp.id() + "/document-requests/" + nyReq + "/due-date")
+                        .header("Authorization", "Bearer " + ownerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedVersion\": 2, \"dueDate\": \"2026-06-01\"}"))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(get("/api/workspaces/" + workspace1Id + "/apps/" + nyApp.id() + "/document-requests/" + nyReq)
+                        .header("Authorization", "Bearer " + ownerToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.overdue").value(false));
+
+        mockMvc.perform(get("/api/workspaces/" + workspace1Id + "/apps/" + auckApp.id() + "/document-requests/" + auckReq)
+                        .header("Authorization", "Bearer " + ownerToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.overdue").value(true));
+
+        // Restore clock
+        MUTABLE_CLOCK.setInstant(Instant.parse("2026-06-01T12:00:00Z"));
+    }
+
+    @Test
+    void mutations_on_archived_app_and_party_rejected() throws Exception {
+        var assignResp = documentService.assignChecklist(workspace1Id, app1Id, party1Id, ownerId, "onboarding_docs");
+        UUID reqId = assignResp.created().get(0).id();
+
+        // 1. Archive party
+        partyService.archiveParty(workspace1Id, app1Id, party1Id, ownerId);
+
+        mockMvc.perform(post("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/document-requests/" + reqId + "/approve")
+                        .header("Authorization", "Bearer " + ownerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedVersion\": 1}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.type").value("party_archived"));
+
+        mockMvc.perform(post("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/document-requests/" + reqId + "/reject")
+                        .header("Authorization", "Bearer " + ownerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedVersion\": 1, \"reason\": \"bad\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.type").value("party_archived"));
+
+        mockMvc.perform(post("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/document-requests/" + reqId + "/due-date")
+                        .header("Authorization", "Bearer " + ownerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedVersion\": 1, \"dueDate\": \"2026-07-01\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.type").value("party_archived"));
+
+        mockMvc.perform(post("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/document-requests/" + reqId + "/cancel")
+                        .header("Authorization", "Bearer " + ownerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedVersion\": 1}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.type").value("party_archived"));
+
+        // 2. Restore party and archive app
+        partyService.restoreParty(workspace1Id, app1Id, party1Id, ownerId);
+        appService.archiveApp(workspace1Id, app1Id, ownerId);
+
+        mockMvc.perform(post("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/document-requests/" + reqId + "/approve")
+                        .header("Authorization", "Bearer " + ownerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedVersion\": 1}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.type").value("app_archived"));
+
+        mockMvc.perform(post("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/document-requests/" + reqId + "/reject")
+                        .header("Authorization", "Bearer " + ownerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedVersion\": 1, \"reason\": \"bad\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.type").value("app_archived"));
+
+        mockMvc.perform(post("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/document-requests/" + reqId + "/due-date")
+                        .header("Authorization", "Bearer " + ownerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedVersion\": 1, \"dueDate\": \"2026-07-01\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.type").value("app_archived"));
+
+        mockMvc.perform(post("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/document-requests/" + reqId + "/cancel")
+                        .header("Authorization", "Bearer " + ownerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedVersion\": 1}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.type").value("app_archived"));
     }
 }

@@ -10,9 +10,28 @@ public class FakeDocumentStorage implements DocumentStorage {
     private final Map<String, byte[]> storage = new ConcurrentHashMap<>();
     private final Map<String, String> contentTypes = new ConcurrentHashMap<>();
     private volatile boolean failing = false;
+    private volatile boolean deleteFailing = false;
+    private volatile java.util.concurrent.CountDownLatch putEnteredLatch = null;
+    private volatile java.util.concurrent.CountDownLatch putBlockLatch = null;
+    private volatile java.util.concurrent.CountDownLatch deleteEnteredLatch = null;
+    private volatile java.util.concurrent.CountDownLatch deleteBlockLatch = null;
+
+    public void setPutLatches(java.util.concurrent.CountDownLatch entered, java.util.concurrent.CountDownLatch block) {
+        this.putEnteredLatch = entered;
+        this.putBlockLatch = block;
+    }
+
+    public void setDeleteLatches(java.util.concurrent.CountDownLatch entered, java.util.concurrent.CountDownLatch block) {
+        this.deleteEnteredLatch = entered;
+        this.deleteBlockLatch = block;
+    }
 
     public void setFailing(boolean failing) {
         this.failing = failing;
+    }
+
+    public void setDeleteFailing(boolean deleteFailing) {
+        this.deleteFailing = deleteFailing;
     }
 
     public boolean isFailing() {
@@ -31,12 +50,28 @@ public class FakeDocumentStorage implements DocumentStorage {
         storage.clear();
         contentTypes.clear();
         failing = false;
+        deleteFailing = false;
+        putEnteredLatch = null;
+        putBlockLatch = null;
+        deleteEnteredLatch = null;
+        deleteBlockLatch = null;
     }
 
     @Override
     public void put(String key, byte[] bytes, String contentType) {
         if (failing) {
             throw new StorageException("Simulated storage failure on put");
+        }
+        if (putEnteredLatch != null) {
+            putEnteredLatch.countDown();
+        }
+        if (putBlockLatch != null) {
+            try {
+                putBlockLatch.await();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new StorageException("Interrupted during fake storage put wait", e);
+            }
         }
         storage.put(key, bytes != null ? bytes.clone() : new byte[0]);
         contentTypes.put(key, contentType != null ? contentType : "application/octet-stream");
@@ -56,8 +91,19 @@ public class FakeDocumentStorage implements DocumentStorage {
 
     @Override
     public void delete(String key) {
-        if (failing) {
+        if (failing || deleteFailing) {
             throw new StorageException("Simulated storage failure on delete");
+        }
+        if (deleteEnteredLatch != null) {
+            deleteEnteredLatch.countDown();
+        }
+        if (deleteBlockLatch != null) {
+            try {
+                deleteBlockLatch.await();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new StorageException("Interrupted during fake storage delete wait", e);
+            }
         }
         storage.remove(key);
         contentTypes.remove(key);

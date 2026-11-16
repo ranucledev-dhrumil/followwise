@@ -106,14 +106,17 @@ public class DocumentRequestStore {
                 .list();
     }
 
-    public List<DocumentRequestRecord> findPage(UUID workspaceId, UUID appId, UUID partyId, int page, int size) {
+    public List<DocumentRequestRecord> findPage(
+            UUID workspaceId, UUID appId, UUID partyId,
+            String status, Boolean overdue, Integer expiringWithinDays, LocalDate todayInApp,
+            int page, int size
+    ) {
         StringBuilder sql = new StringBuilder("""
                 SELECT * FROM document_requests
                 WHERE workspace_id = :wid AND app_id = :aid
                 """);
-        if (partyId != null) {
-            sql.append(" AND party_id = :pid");
-        }
+        applyFilters(sql, partyId, status, overdue, expiringWithinDays);
+
         sql.append(" ORDER BY due_date ASC NULLS LAST, id ASC LIMIT :size OFFSET :offset");
 
         var spec = jdbcClient.sql(sql.toString())
@@ -122,27 +125,87 @@ public class DocumentRequestStore {
                 .param("size", size)
                 .param("offset", (long) page * size);
 
-        if (partyId != null) {
-            spec.param("pid", partyId);
-        }
+        bindFilterParams(spec, partyId, status, overdue, expiringWithinDays, todayInApp);
+
         return spec.query(REQUEST_ROW_MAPPER).list();
     }
 
-    public long countFiltered(UUID workspaceId, UUID appId, UUID partyId) {
+    public long countFiltered(
+            UUID workspaceId, UUID appId, UUID partyId,
+            String status, Boolean overdue, Integer expiringWithinDays, LocalDate todayInApp
+    ) {
         StringBuilder sql = new StringBuilder("""
                 SELECT count(*) FROM document_requests
                 WHERE workspace_id = :wid AND app_id = :aid
                 """);
-        if (partyId != null) {
-            sql.append(" AND party_id = :pid");
-        }
+        applyFilters(sql, partyId, status, overdue, expiringWithinDays);
+
         var spec = jdbcClient.sql(sql.toString())
                 .param("wid", workspaceId)
                 .param("aid", appId);
+
+        bindFilterParams(spec, partyId, status, overdue, expiringWithinDays, todayInApp);
+
+        return spec.query(Long.class).single();
+    }
+
+    private void applyFilters(StringBuilder sql, UUID partyId, String status, Boolean overdue, Integer expiringWithinDays) {
+        if (partyId != null) {
+            sql.append(" AND party_id = :pid");
+        }
+
+        if (status == null || status.isBlank()) {
+            sql.append(" AND cancelled_at IS NULL");
+        } else if ("cancelled".equalsIgnoreCase(status)) {
+            sql.append(" AND cancelled_at IS NOT NULL");
+        } else if ("expired".equalsIgnoreCase(status)) {
+            sql.append(" AND cancelled_at IS NULL AND status = 'APPROVED' AND expires_on IS NOT NULL AND expires_on < :todayInApp");
+        } else {
+            sql.append(" AND cancelled_at IS NULL AND status = :statusFilter");
+        }
+
+        if (overdue != null) {
+            if (overdue) {
+                sql.append(" AND (required = true AND status IN ('PENDING', 'REJECTED') AND due_date IS NOT NULL AND due_date < :todayInApp)");
+            } else {
+                sql.append(" AND NOT (required = true AND status IN ('PENDING', 'REJECTED') AND due_date IS NOT NULL AND due_date < :todayInApp)");
+            }
+        }
+
+        if (expiringWithinDays != null) {
+            sql.append(" AND (status = 'APPROVED' AND expires_on IS NOT NULL AND expires_on >= :todayInApp AND expires_on <= :expiringEnd)");
+        }
+    }
+
+    private void bindFilterParams(
+            org.springframework.jdbc.core.simple.JdbcClient.StatementSpec spec,
+            UUID partyId, String status, Boolean overdue, Integer expiringWithinDays, LocalDate todayInApp
+    ) {
         if (partyId != null) {
             spec.param("pid", partyId);
         }
-        return spec.query(Long.class).single();
+
+        boolean needsToday = false;
+        if (status != null && !status.isBlank()) {
+            if ("expired".equalsIgnoreCase(status)) {
+                needsToday = true;
+            } else if (!"cancelled".equalsIgnoreCase(status)) {
+                spec.param("statusFilter", status.toUpperCase());
+            }
+        }
+
+        if (overdue != null) {
+            needsToday = true;
+        }
+
+        if (expiringWithinDays != null) {
+            needsToday = true;
+            spec.param("expiringEnd", todayInApp.plusDays(expiringWithinDays));
+        }
+
+        if (needsToday && todayInApp != null) {
+            spec.param("todayInApp", todayInApp);
+        }
     }
 
     public long countActiveByParty(UUID workspaceId, UUID appId, UUID partyId) {
@@ -203,6 +266,7 @@ public class DocumentRequestStore {
                     updated_at = :updatedAt
                 WHERE id = :id AND workspace_id = :wid AND app_id = :aid
                   AND version = :expectedVersion
+                  AND cancelled_at IS NULL
                 """)
                 .param("id", requestId)
                 .param("wid", workspaceId)
@@ -211,6 +275,99 @@ public class DocumentRequestStore {
                 .param("expectedVersion", expectedVersion)
                 .param("updatedBy", updatedBy)
                 .param("updatedAt", Timestamp.from(now))
+                .update();
+    }
+
+    public int updateToApproved(UUID workspaceId, UUID appId, UUID requestId,
+                                LocalDate expiresOn, int expectedVersion, UUID updatedBy, Instant now) {
+        return jdbcClient.sql("""
+                UPDATE document_requests
+                SET status = 'APPROVED',
+                    approved_at = :now,
+                    expires_on = :expiresOn,
+                    status_reason = NULL,
+                    version = version + 1,
+                    updated_by = :updatedBy,
+                    updated_at = :now
+                WHERE id = :id AND workspace_id = :wid AND app_id = :aid
+                  AND version = :expectedVersion
+                  AND cancelled_at IS NULL
+                """)
+                .param("id", requestId)
+                .param("wid", workspaceId)
+                .param("aid", appId)
+                .param("expiresOn", expiresOn)
+                .param("expectedVersion", expectedVersion)
+                .param("updatedBy", updatedBy)
+                .param("now", Timestamp.from(now))
+                .update();
+    }
+
+    public int updateToRejected(UUID workspaceId, UUID appId, UUID requestId,
+                                String reason, int expectedVersion, UUID updatedBy, Instant now) {
+        return jdbcClient.sql("""
+                UPDATE document_requests
+                SET status = 'REJECTED',
+                    status_reason = :reason,
+                    approved_at = NULL,
+                    expires_on = NULL,
+                    version = version + 1,
+                    updated_by = :updatedBy,
+                    updated_at = :now
+                WHERE id = :id AND workspace_id = :wid AND app_id = :aid
+                  AND version = :expectedVersion
+                  AND cancelled_at IS NULL
+                """)
+                .param("id", requestId)
+                .param("wid", workspaceId)
+                .param("aid", appId)
+                .param("reason", reason)
+                .param("expectedVersion", expectedVersion)
+                .param("updatedBy", updatedBy)
+                .param("now", Timestamp.from(now))
+                .update();
+    }
+
+    public int updateDueDate(UUID workspaceId, UUID appId, UUID requestId,
+                             LocalDate dueDate, int expectedVersion, UUID updatedBy, Instant now) {
+        return jdbcClient.sql("""
+                UPDATE document_requests
+                SET due_date = :dueDate,
+                    version = version + 1,
+                    updated_by = :updatedBy,
+                    updated_at = :now
+                WHERE id = :id AND workspace_id = :wid AND app_id = :aid
+                  AND version = :expectedVersion
+                  AND cancelled_at IS NULL
+                """)
+                .param("id", requestId)
+                .param("wid", workspaceId)
+                .param("aid", appId)
+                .param("dueDate", dueDate)
+                .param("expectedVersion", expectedVersion)
+                .param("updatedBy", updatedBy)
+                .param("now", Timestamp.from(now))
+                .update();
+    }
+
+    public int updateToCancelled(UUID workspaceId, UUID appId, UUID requestId,
+                                 int expectedVersion, UUID updatedBy, Instant now) {
+        return jdbcClient.sql("""
+                UPDATE document_requests
+                SET cancelled_at = :now,
+                    version = version + 1,
+                    updated_by = :updatedBy,
+                    updated_at = :now
+                WHERE id = :id AND workspace_id = :wid AND app_id = :aid
+                  AND version = :expectedVersion
+                  AND cancelled_at IS NULL
+                """)
+                .param("id", requestId)
+                .param("wid", workspaceId)
+                .param("aid", appId)
+                .param("expectedVersion", expectedVersion)
+                .param("updatedBy", updatedBy)
+                .param("now", Timestamp.from(now))
                 .update();
     }
 }

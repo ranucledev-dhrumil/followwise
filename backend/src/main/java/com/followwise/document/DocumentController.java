@@ -56,12 +56,18 @@ public class DocumentController {
     public ResponseEntity<PageResponse<DocumentRequestResponse>> listRequests(
             @PathVariable("workspaceId") UUID workspaceId,
             @PathVariable("appId") UUID appId,
-            @RequestParam(value = "page", defaultValue = "0") int page,
-            @RequestParam(value = "size", defaultValue = "20") int size,
+            @RequestParam(value = "status", required = false) String status,
+            @RequestParam(value = "overdue", required = false) Boolean overdue,
+            @RequestParam(value = "expiringWithinDays", required = false) Integer expiringWithinDays,
+            @RequestParam(value = "partyId", required = false) UUID partyId,
+            @RequestParam(value = "page", required = false) Integer page,
+            @RequestParam(value = "size", required = false) Integer size,
             @AuthenticationPrincipal Jwt jwt
     ) {
         UUID userId = UUID.fromString(jwt.getSubject());
-        return ResponseEntity.ok(documentService.listRequests(workspaceId, appId, userId, page, size));
+        return ResponseEntity.ok(documentService.listRequests(
+                workspaceId, appId, userId, status, overdue, expiringWithinDays, partyId, page, size
+        ));
     }
 
     @GetMapping("/document-requests/{requestId}")
@@ -105,6 +111,70 @@ public class DocumentController {
         return ResponseEntity.ok(documentService.listVersions(workspaceId, appId, requestId, userId));
     }
 
+    @PostMapping("/document-requests/{requestId}/approve")
+    public ResponseEntity<DocumentRequestResponse> approveRequest(
+            @PathVariable("workspaceId") UUID workspaceId,
+            @PathVariable("appId") UUID appId,
+            @PathVariable("requestId") UUID requestId,
+            @RequestBody byte[] rawBody,
+            @AuthenticationPrincipal Jwt jwt
+    ) {
+        UUID userId = UUID.fromString(jwt.getSubject());
+        var parsed = documentPayloadParser.parseApproveRequest(rawBody);
+        DocumentRequestResponse resp = documentService.approveRequest(
+                workspaceId, appId, requestId, userId, parsed.expectedVersion(), parsed.expiresOn()
+        );
+        return ResponseEntity.ok(resp);
+    }
+
+    @PostMapping("/document-requests/{requestId}/reject")
+    public ResponseEntity<DocumentRequestResponse> rejectRequest(
+            @PathVariable("workspaceId") UUID workspaceId,
+            @PathVariable("appId") UUID appId,
+            @PathVariable("requestId") UUID requestId,
+            @RequestBody byte[] rawBody,
+            @AuthenticationPrincipal Jwt jwt
+    ) {
+        UUID userId = UUID.fromString(jwt.getSubject());
+        var parsed = documentPayloadParser.parseRejectRequest(rawBody);
+        DocumentRequestResponse resp = documentService.rejectRequest(
+                workspaceId, appId, requestId, userId, parsed.expectedVersion(), parsed.reason()
+        );
+        return ResponseEntity.ok(resp);
+    }
+
+    @PostMapping("/document-requests/{requestId}/due-date")
+    public ResponseEntity<DocumentRequestResponse> updateDueDate(
+            @PathVariable("workspaceId") UUID workspaceId,
+            @PathVariable("appId") UUID appId,
+            @PathVariable("requestId") UUID requestId,
+            @RequestBody byte[] rawBody,
+            @AuthenticationPrincipal Jwt jwt
+    ) {
+        UUID userId = UUID.fromString(jwt.getSubject());
+        var parsed = documentPayloadParser.parseDueDateRequest(rawBody);
+        DocumentRequestResponse resp = documentService.updateDueDate(
+                workspaceId, appId, requestId, userId, parsed.expectedVersion(), parsed.dueDate()
+        );
+        return ResponseEntity.ok(resp);
+    }
+
+    @PostMapping("/document-requests/{requestId}/cancel")
+    public ResponseEntity<DocumentRequestResponse> cancelRequest(
+            @PathVariable("workspaceId") UUID workspaceId,
+            @PathVariable("appId") UUID appId,
+            @PathVariable("requestId") UUID requestId,
+            @RequestBody byte[] rawBody,
+            @AuthenticationPrincipal Jwt jwt
+    ) {
+        UUID userId = UUID.fromString(jwt.getSubject());
+        var parsed = documentPayloadParser.parseCancelRequest(rawBody);
+        DocumentRequestResponse resp = documentService.cancelRequest(
+                workspaceId, appId, requestId, userId, parsed.expectedVersion()
+        );
+        return ResponseEntity.ok(resp);
+    }
+
     @GetMapping("/documents/{documentId}/download")
     public ResponseEntity<org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody> downloadDocument(
             @PathVariable("workspaceId") UUID workspaceId,
@@ -137,5 +207,16 @@ public class DocumentController {
                 .contentType(org.springframework.http.MediaType.parseMediaType(download.contentType()))
                 .contentLength(download.sizeBytes())
                 .body(body);
+    }
+
+    @PostMapping("/documents/{documentId}/purge")
+    public ResponseEntity<DocumentVersionResponse> purgeDocument(
+            @PathVariable("workspaceId") UUID workspaceId,
+            @PathVariable("appId") UUID appId,
+            @PathVariable("documentId") UUID documentId,
+            @AuthenticationPrincipal Jwt jwt
+    ) {
+        UUID userId = UUID.fromString(jwt.getSubject());
+        return ResponseEntity.ok(documentService.purgeDocument(workspaceId, appId, documentId, userId));
     }
 }
