@@ -133,3 +133,5 @@ None.
 - Code defaults still point at Gmail (`mail.host`) and a daily cap of 400; Brevo free allows 300 per day. Render must set MAIL_DAILY_CAP=250. Change the defaults in a small later plan.
 - The CSP uses 'unsafe-inline' for scripts; move to nonces later.
 - Commit 31b527b is labeled "feat: frontend skeleton (PLAN-0005)" but contains the PLAN-0006 changes. Not rewritten; use correct messages from now on.
+- Document download opens the storage stream inside a read-only transaction, which holds a DB connection during the storage request. Fixed in PLAN-0014 slice 0.
+- Tests need a healthy Docker. If a run fails in bulk (many errors after about 100 tests), restart Docker Desktop and capture the first error line before anything else.
