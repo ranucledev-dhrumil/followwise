@@ -39,7 +39,11 @@ public class OutboxService {
 
         for (EmailOutbox item : batch) {
             try {
-                emailSender.send(item.getToAddress(), item.getSubject(), item.getBodyText());
+                if (item.getReplyTo() != null && !item.getReplyTo().isBlank()) {
+                    emailSender.send(item.getToAddress(), item.getSubject(), item.getBodyText(), item.getReplyTo());
+                } else {
+                    emailSender.send(item.getToAddress(), item.getSubject(), item.getBodyText());
+                }
                 item.setStatus(EmailOutbox.STATUS_SENT);
                 item.setSentAt(now);
                 item.setBodyText("[redacted]");

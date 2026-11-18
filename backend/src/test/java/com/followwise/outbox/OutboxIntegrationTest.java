@@ -137,6 +137,8 @@ class OutboxIntegrationTest extends AbstractIntegrationTest {
 
         CountDownLatch startLatch = new CountDownLatch(1);
         CountDownLatch finishLatch = new CountDownLatch(2);
+        CountDownLatch t1ClaimedLatch = new CountDownLatch(1);
+        CountDownLatch releaseT1Latch = new CountDownLatch(1);
 
         List<UUID> claimedByT1 = Collections.synchronizedList(new ArrayList<>());
         List<UUID> claimedByT2 = Collections.synchronizedList(new ArrayList<>());
@@ -152,8 +154,9 @@ class OutboxIntegrationTest extends AbstractIntegrationTest {
                     for (EmailOutbox e : batch) {
                         claimedByT1.add(e.getId());
                     }
+                    t1ClaimedLatch.countDown();
                     try {
-                        Thread.sleep(100);
+                        releaseT1Latch.await(10, TimeUnit.SECONDS);
                     } catch (InterruptedException ignored) {}
                     return null;
                 });
@@ -166,14 +169,13 @@ class OutboxIntegrationTest extends AbstractIntegrationTest {
         Thread t2 = new Thread(() -> {
             try {
                 startLatch.await();
+                t1ClaimedLatch.await(10, TimeUnit.SECONDS);
                 tx2.execute(status -> {
                     List<EmailOutbox> batch = outboxRepository.claimBatch(now, 2);
                     for (EmailOutbox e : batch) {
                         claimedByT2.add(e.getId());
                     }
-                    try {
-                        Thread.sleep(100);
-                    } catch (InterruptedException ignored) {}
+                    releaseT1Latch.countDown();
                     return null;
                 });
             } catch (Exception ignored) {
@@ -196,5 +198,22 @@ class OutboxIntegrationTest extends AbstractIntegrationTest {
         intersection.retainAll(claimedByT2);
         // FOR UPDATE SKIP LOCKED ensures disjoint claim sets
         assertThat(intersection).isEmpty();
+    }
+
+    @Test
+    void reminderRowsClaimedAfterAccountRows() {
+        Instant now = Instant.now();
+        EmailOutbox olderReminder = new EmailOutbox(
+                UUID.randomUUID(), "REMINDER", "party@example.com", "Reminder", "Body", now.minusSeconds(60)
+        );
+        EmailOutbox newerVerify = new EmailOutbox(
+                UUID.randomUUID(), EmailOutbox.KIND_VERIFY_EMAIL, "user@example.com", "Verify", "Token", now.minusSeconds(10)
+        );
+        outboxRepository.saveAll(List.of(olderReminder, newerVerify));
+
+        TransactionTemplate tx = new TransactionTemplate(transactionManager);
+        List<EmailOutbox> claimed = tx.execute(status -> outboxRepository.claimBatch(now, 1));
+        assertThat(claimed).hasSize(1);
+        assertThat(claimed.get(0).getId()).isEqualTo(newerVerify.getId());
     }
 }

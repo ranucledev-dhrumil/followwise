@@ -465,4 +465,85 @@ public class LedgerStore {
                 ))
                 .list();
     }
+
+    public record ReminderChargeCandidate(
+            UUID chargeId,
+            UUID partyId,
+            String label,
+            LocalDate dueDate,
+            long outstandingCents,
+            String partyDisplayName,
+            String partyDataJson,
+            boolean remindersPaused
+    ) {}
+
+    public List<ReminderChargeCandidate> findChargesForReminder(
+            UUID workspaceId, UUID appId, String partyType,
+            LocalDate minDueDate, LocalDate maxDueDate, int limit
+    ) {
+        return findChargesForReminder(workspaceId, appId, partyType, minDueDate, maxDueDate, null, null, null, limit);
+    }
+
+    public List<ReminderChargeCandidate> findChargesForReminder(
+            UUID workspaceId, UUID appId, String partyType,
+            LocalDate minDueDate, LocalDate maxDueDate,
+            LocalDate cursorDueDate, UUID cursorPartyId, UUID cursorChargeId,
+            int limit
+    ) {
+        return jdbcClient.sql("""
+                SELECT c.id AS charge_id, c.party_id, c.label, c.due_date,
+                       (SELECT COALESCE(SUM(e.amount_cents), 0)::bigint FROM ledger_entries e WHERE e.workspace_id = c.workspace_id AND e.app_id = c.app_id AND e.charge_id = c.id) AS outstanding_cents,
+                       p.display_name AS party_display_name, p.data::text AS party_data,
+                       (p.reminders_paused_at IS NOT NULL) AS reminders_paused
+                FROM ledger_entries c
+                JOIN parties p ON p.id = c.party_id AND p.workspace_id = c.workspace_id AND p.app_id = c.app_id
+                WHERE c.workspace_id = :wid
+                  AND c.app_id = :aid
+                  AND c.entry_type = 'CHARGE'
+                  AND c.kind IN ('recurring', 'manual', 'late_fee')
+                  AND p.party_type = :partyType
+                  AND p.archived_at IS NULL
+                  AND c.due_date BETWEEN :minDueDate AND :maxDueDate
+                  AND NOT EXISTS (
+                      SELECT 1 FROM ledger_entries r
+                      WHERE r.workspace_id = c.workspace_id
+                        AND r.app_id = c.app_id
+                        AND r.charge_id = c.id
+                        AND r.reverses_entry_id = c.id
+                  )
+                  AND (
+                      SELECT COALESCE(SUM(amount_cents), 0)::bigint
+                      FROM ledger_entries e
+                      WHERE e.workspace_id = c.workspace_id
+                        AND e.app_id = c.app_id
+                        AND e.charge_id = c.id
+                  ) > 0
+                  AND (
+                      :cursorDueDate::date IS NULL
+                      OR (c.due_date, c.party_id, c.id) > (:cursorDueDate::date, :cursorPartyId::uuid, :cursorChargeId::uuid)
+                  )
+                ORDER BY c.due_date ASC, c.party_id ASC, c.id ASC
+                LIMIT :limit
+                """)
+                .param("wid", workspaceId)
+                .param("aid", appId)
+                .param("partyType", partyType)
+                .param("minDueDate", minDueDate)
+                .param("maxDueDate", maxDueDate)
+                .param("cursorDueDate", cursorDueDate)
+                .param("cursorPartyId", cursorPartyId)
+                .param("cursorChargeId", cursorChargeId)
+                .param("limit", limit)
+                .query((rs, rowNum) -> new ReminderChargeCandidate(
+                        rs.getObject("charge_id", UUID.class),
+                        rs.getObject("party_id", UUID.class),
+                        rs.getString("label"),
+                        rs.getObject("due_date", LocalDate.class),
+                        rs.getLong("outstanding_cents"),
+                        rs.getString("party_display_name"),
+                        rs.getString("party_data"),
+                        rs.getBoolean("reminders_paused")
+                ))
+                .list();
+    }
 }

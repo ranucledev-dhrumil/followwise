@@ -370,4 +370,143 @@ public class DocumentRequestStore {
                 .param("now", Timestamp.from(now))
                 .update();
     }
+
+    public record ReminderDueRequestCandidate(
+            UUID requestId,
+            UUID partyId,
+            String checklistId,
+            String itemId,
+            String label,
+            LocalDate dueDate,
+            String partyDisplayName,
+            String partyDataJson,
+            boolean remindersPaused
+    ) {}
+
+    public List<ReminderDueRequestCandidate> findDueRequestsForReminder(
+            UUID workspaceId, UUID appId, String partyType,
+            LocalDate minDueDate, LocalDate maxDueDate, int limit
+    ) {
+        return findDueRequestsForReminder(workspaceId, appId, partyType, minDueDate, maxDueDate, null, null, null, limit);
+    }
+
+    public List<ReminderDueRequestCandidate> findDueRequestsForReminder(
+            UUID workspaceId, UUID appId, String partyType,
+            LocalDate minDueDate, LocalDate maxDueDate,
+            LocalDate cursorDueDate, UUID cursorPartyId, UUID cursorRequestId,
+            int limit
+    ) {
+        return jdbcClient.sql("""
+                SELECT r.id, r.party_id, r.checklist_id, r.item_id, r.label, r.due_date,
+                       p.display_name AS party_display_name, p.data::text AS party_data,
+                       (p.reminders_paused_at IS NOT NULL) AS reminders_paused
+                FROM document_requests r
+                JOIN parties p ON p.id = r.party_id AND p.workspace_id = r.workspace_id AND p.app_id = r.app_id
+                WHERE r.workspace_id = :wid
+                  AND r.app_id = :aid
+                  AND p.party_type = :partyType
+                  AND p.archived_at IS NULL
+                  AND r.required = true
+                  AND r.status IN ('PENDING', 'REJECTED')
+                  AND r.cancelled_at IS NULL
+                  AND r.due_date IS NOT NULL
+                  AND r.due_date BETWEEN :minDueDate AND :maxDueDate
+                  AND (
+                      :cursorDueDate::date IS NULL
+                      OR (r.due_date, r.party_id, r.id) > (:cursorDueDate::date, :cursorPartyId::uuid, :cursorRequestId::uuid)
+                  )
+                ORDER BY r.due_date ASC, r.party_id ASC, r.id ASC
+                LIMIT :limit
+                """)
+                .param("wid", workspaceId)
+                .param("aid", appId)
+                .param("partyType", partyType)
+                .param("minDueDate", minDueDate)
+                .param("maxDueDate", maxDueDate)
+                .param("cursorDueDate", cursorDueDate)
+                .param("cursorPartyId", cursorPartyId)
+                .param("cursorRequestId", cursorRequestId)
+                .param("limit", limit)
+                .query((rs, rowNum) -> new ReminderDueRequestCandidate(
+                        rs.getObject("id", UUID.class),
+                        rs.getObject("party_id", UUID.class),
+                        rs.getString("checklist_id"),
+                        rs.getString("item_id"),
+                        rs.getString("label"),
+                        rs.getObject("due_date", LocalDate.class),
+                        rs.getString("party_display_name"),
+                        rs.getString("party_data"),
+                        rs.getBoolean("reminders_paused")
+                ))
+                .list();
+    }
+
+    public record ReminderExpiringRequestCandidate(
+            UUID requestId,
+            UUID partyId,
+            String checklistId,
+            String itemId,
+            String label,
+            LocalDate expiresOn,
+            String partyDisplayName,
+            String partyDataJson,
+            boolean remindersPaused
+    ) {}
+
+    public List<ReminderExpiringRequestCandidate> findExpiringRequestsForReminder(
+            UUID workspaceId, UUID appId, String partyType,
+            LocalDate minExpiresOn, LocalDate maxExpiresOn, int limit
+    ) {
+        return findExpiringRequestsForReminder(workspaceId, appId, partyType, minExpiresOn, maxExpiresOn, null, null, null, limit);
+    }
+
+    public List<ReminderExpiringRequestCandidate> findExpiringRequestsForReminder(
+            UUID workspaceId, UUID appId, String partyType,
+            LocalDate minExpiresOn, LocalDate maxExpiresOn,
+            LocalDate cursorExpiresOn, UUID cursorPartyId, UUID cursorRequestId,
+            int limit
+    ) {
+        return jdbcClient.sql("""
+                SELECT r.id, r.party_id, r.checklist_id, r.item_id, r.label, r.expires_on,
+                       p.display_name AS party_display_name, p.data::text AS party_data,
+                       (p.reminders_paused_at IS NOT NULL) AS reminders_paused
+                FROM document_requests r
+                JOIN parties p ON p.id = r.party_id AND p.workspace_id = r.workspace_id AND p.app_id = r.app_id
+                WHERE r.workspace_id = :wid
+                  AND r.app_id = :aid
+                  AND p.party_type = :partyType
+                  AND p.archived_at IS NULL
+                  AND r.status = 'APPROVED'
+                  AND r.cancelled_at IS NULL
+                  AND r.expires_on IS NOT NULL
+                  AND r.expires_on BETWEEN :minExpiresOn AND :maxExpiresOn
+                  AND (
+                      :cursorExpiresOn::date IS NULL
+                      OR (r.expires_on, r.party_id, r.id) > (:cursorExpiresOn::date, :cursorPartyId::uuid, :cursorRequestId::uuid)
+                  )
+                ORDER BY r.expires_on ASC, r.party_id ASC, r.id ASC
+                LIMIT :limit
+                """)
+                .param("wid", workspaceId)
+                .param("aid", appId)
+                .param("partyType", partyType)
+                .param("minExpiresOn", minExpiresOn)
+                .param("maxExpiresOn", maxExpiresOn)
+                .param("cursorExpiresOn", cursorExpiresOn)
+                .param("cursorPartyId", cursorPartyId)
+                .param("cursorRequestId", cursorRequestId)
+                .param("limit", limit)
+                .query((rs, rowNum) -> new ReminderExpiringRequestCandidate(
+                        rs.getObject("id", UUID.class),
+                        rs.getObject("party_id", UUID.class),
+                        rs.getString("checklist_id"),
+                        rs.getString("item_id"),
+                        rs.getString("label"),
+                        rs.getObject("expires_on", LocalDate.class),
+                        rs.getString("party_display_name"),
+                        rs.getString("party_data"),
+                        rs.getBoolean("reminders_paused")
+                ))
+                .list();
+    }
 }

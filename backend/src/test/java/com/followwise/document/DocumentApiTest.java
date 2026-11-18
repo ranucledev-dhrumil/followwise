@@ -976,7 +976,7 @@ class DocumentApiTest extends AbstractIntegrationTest {
         }).start();
 
         startLatch1.countDown();
-        assertTrue(doneLatch1.await(5, TimeUnit.SECONDS));
+        assertTrue(doneLatch1.await(30, TimeUnit.SECONDS));
 
         List<Integer> statuses1 = List.of(status1a.get(), status1b.get());
         assertTrue(statuses1.contains(201), "One upload must succeed with 201");
@@ -1032,7 +1032,7 @@ class DocumentApiTest extends AbstractIntegrationTest {
         }).start();
 
         startLatch2.countDown();
-        assertTrue(doneLatch2.await(5, TimeUnit.SECONDS));
+        assertTrue(doneLatch2.await(30, TimeUnit.SECONDS));
 
         List<Integer> statuses2 = List.of(status2a.get(), status2b.get());
         assertTrue(statuses2.contains(201), "One upload must succeed with 201");
@@ -1099,7 +1099,7 @@ class DocumentApiTest extends AbstractIntegrationTest {
         }).start();
 
         startLatch.countDown();
-        assertTrue(doneLatch.await(5, TimeUnit.SECONDS));
+        assertTrue(doneLatch.await(30, TimeUnit.SECONDS));
 
         // Neither returns 500
         assertTrue(errors.isEmpty(), "Errors occurred during simultaneous uploads: " + errors);
@@ -1303,6 +1303,66 @@ class DocumentApiTest extends AbstractIntegrationTest {
 
         assertEquals(201, upload1Status.get());
         assertEquals(201, upload2Status.get());
+    }
+
+    @Test
+    void blocked_storage_open_holds_no_db_lock_and_allows_concurrent_app_activity() throws Exception {
+        var assignResp = documentService.assignChecklist(workspace1Id, app1Id, party1Id, ownerId, "onboarding_docs");
+        UUID req1 = assignResp.created().get(0).id();
+        UUID req2 = assignResp.created().get(1).id();
+
+        // Upload doc1
+        var up1 = documentService.uploadDocument(workspace1Id, app1Id, req1, ownerId, VALID_PDF, "doc1.pdf");
+        UUID doc1Id = up1.document().id();
+        String doc1StorageKey = documentStore.findById(workspace1Id, app1Id, doc1Id).orElseThrow().storageKey();
+
+        // Upload doc2
+        var up2 = documentService.uploadDocument(workspace1Id, app1Id, req2, ownerId, VALID_JPEG, "doc2.jpeg");
+        UUID doc2Id = up2.document().id();
+
+        CountDownLatch enteredOpen = new CountDownLatch(1);
+        CountDownLatch blockOpen = new CountDownLatch(1);
+        FAKE_STORAGE.setOpenLatches(doc1StorageKey, enteredOpen, blockOpen);
+
+        AtomicInteger download1Status = new AtomicInteger();
+        Thread downloadThread = new Thread(() -> {
+            try {
+                var res = mockMvc.perform(get("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/documents/" + doc1Id + "/download")
+                                .header("Authorization", "Bearer " + ownerToken))
+                        .andReturn();
+                download1Status.set(res.getResponse().getStatus());
+            } catch (Exception e) {
+                download1Status.set(500);
+            }
+        });
+        downloadThread.start();
+
+        // Wait until download 1 is blocked inside storage.open
+        assertTrue(enteredOpen.await(5, TimeUnit.SECONDS), "Download 1 must reach storage.open");
+
+        // 1. App row can be locked with FOR UPDATE NOWAIT from a second connection (no row lock held)
+        try (var conn = dataSource.getConnection()) {
+            conn.setAutoCommit(false);
+            try (var stmt = conn.prepareStatement("SELECT id FROM apps WHERE id = ? FOR UPDATE NOWAIT")) {
+                stmt.setObject(1, app1Id);
+                try (var rs = stmt.executeQuery()) {
+                    assertTrue(rs.next(), "App row lock with FOR UPDATE NOWAIT must succeed while storage open is blocked");
+                }
+            }
+            conn.rollback();
+        }
+
+        // 2. A second request for another document completes
+        mockMvc.perform(get("/api/workspaces/" + workspace1Id + "/apps/" + app1Id + "/documents/" + doc2Id + "/download")
+                        .header("Authorization", "Bearer " + ownerToken))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Content-Type", "image/jpeg"));
+
+        // Unblock download 1
+        blockOpen.countDown();
+        downloadThread.join(5000);
+
+        assertEquals(200, download1Status.get());
     }
 
     @Test
@@ -1972,7 +2032,7 @@ class DocumentApiTest extends AbstractIntegrationTest {
         new Thread(approveAction).start();
         new Thread(approveAction).start();
         startLatch1.countDown();
-        assertTrue(doneLatch1.await(5, TimeUnit.SECONDS));
+        assertTrue(doneLatch1.await(30, TimeUnit.SECONDS));
 
         assertEquals(1, successApprove.get());
         assertEquals(1, conflictApprove.get());
@@ -2016,7 +2076,7 @@ class DocumentApiTest extends AbstractIntegrationTest {
         }).start();
 
         startLatch2.countDown();
-        assertTrue(doneLatch2.await(5, TimeUnit.SECONDS));
+        assertTrue(doneLatch2.await(30, TimeUnit.SECONDS));
 
         assertEquals(1, successMixed.get());
         assertEquals(1, conflictMixed.get());

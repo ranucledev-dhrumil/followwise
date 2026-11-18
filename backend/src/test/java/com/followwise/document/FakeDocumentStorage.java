@@ -15,6 +15,9 @@ public class FakeDocumentStorage implements DocumentStorage {
     private volatile java.util.concurrent.CountDownLatch putBlockLatch = null;
     private volatile java.util.concurrent.CountDownLatch deleteEnteredLatch = null;
     private volatile java.util.concurrent.CountDownLatch deleteBlockLatch = null;
+    private volatile java.util.concurrent.CountDownLatch openEnteredLatch = null;
+    private volatile java.util.concurrent.CountDownLatch openBlockLatch = null;
+    private volatile String openBlockKey = null;
 
     public void setPutLatches(java.util.concurrent.CountDownLatch entered, java.util.concurrent.CountDownLatch block) {
         this.putEnteredLatch = entered;
@@ -24,6 +27,12 @@ public class FakeDocumentStorage implements DocumentStorage {
     public void setDeleteLatches(java.util.concurrent.CountDownLatch entered, java.util.concurrent.CountDownLatch block) {
         this.deleteEnteredLatch = entered;
         this.deleteBlockLatch = block;
+    }
+
+    public void setOpenLatches(String targetKey, java.util.concurrent.CountDownLatch entered, java.util.concurrent.CountDownLatch block) {
+        this.openBlockKey = targetKey;
+        this.openEnteredLatch = entered;
+        this.openBlockLatch = block;
     }
 
     public void setFailing(boolean failing) {
@@ -55,6 +64,9 @@ public class FakeDocumentStorage implements DocumentStorage {
         putBlockLatch = null;
         deleteEnteredLatch = null;
         deleteBlockLatch = null;
+        openEnteredLatch = null;
+        openBlockLatch = null;
+        openBlockKey = null;
     }
 
     @Override
@@ -81,6 +93,17 @@ public class FakeDocumentStorage implements DocumentStorage {
     public InputStream open(String key) {
         if (failing) {
             throw new StorageException("Simulated storage failure on open");
+        }
+        if (openEnteredLatch != null && (openBlockKey == null || openBlockKey.equals(key))) {
+            openEnteredLatch.countDown();
+        }
+        if (openBlockLatch != null && (openBlockKey == null || openBlockKey.equals(key))) {
+            try {
+                openBlockLatch.await();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new StorageException("Interrupted during fake storage open wait", e);
+            }
         }
         byte[] bytes = storage.get(key);
         if (bytes == null) {

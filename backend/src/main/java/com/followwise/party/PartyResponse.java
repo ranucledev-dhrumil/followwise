@@ -13,6 +13,7 @@ public record PartyResponse(
         int version,
         int definitionVersion,
         boolean archived,
+        boolean remindersPaused,
         Instant createdAt,
         Instant updatedAt
 ) {

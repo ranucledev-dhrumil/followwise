@@ -14,7 +14,8 @@ public enum Permission {
     MANAGE_LEDGER(Set.of(Role.OWNER)),
     VIEW_DOCUMENTS(Set.of(Role.OWNER, Role.STAFF)),
     EDIT_DOCUMENTS(Set.of(Role.OWNER, Role.STAFF)),
-    MANAGE_DOCUMENTS(Set.of(Role.OWNER));
+    MANAGE_DOCUMENTS(Set.of(Role.OWNER)),
+    VIEW_REMINDERS(Set.of(Role.OWNER, Role.STAFF));
 
     private final Set<Role> grantedRoles;
 

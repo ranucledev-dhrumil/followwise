@@ -19,6 +19,7 @@ public class EmailOutbox {
     public static final String KIND_VERIFY_EMAIL = "VERIFY_EMAIL";
     public static final String KIND_RESET_PASSWORD = "RESET_PASSWORD";
     public static final String KIND_PASSWORD_CHANGED = "PASSWORD_CHANGED";
+    public static final String KIND_REMINDER = "REMINDER";
 
     @Id
     private UUID id;
@@ -34,6 +35,9 @@ public class EmailOutbox {
 
     @Column(name = "body_text", nullable = false)
     private String bodyText;
+
+    @Column(name = "reply_to")
+    private String replyTo;
 
     @Column(nullable = false)
     private String status;
@@ -57,11 +61,16 @@ public class EmailOutbox {
     }
 
     public EmailOutbox(UUID id, String kind, String toAddress, String subject, String bodyText, Instant now) {
+        this(id, kind, toAddress, subject, bodyText, null, now);
+    }
+
+    public EmailOutbox(UUID id, String kind, String toAddress, String subject, String bodyText, String replyTo, Instant now) {
         this.id = id;
         this.kind = kind;
         this.toAddress = toAddress;
         this.subject = subject;
         this.bodyText = bodyText;
+        this.replyTo = replyTo;
         this.status = STATUS_QUEUED;
         this.attempts = 0;
         this.lastError = null;
@@ -108,6 +117,14 @@ public class EmailOutbox {
 
     public void setBodyText(String bodyText) {
         this.bodyText = bodyText;
+    }
+
+    public String getReplyTo() {
+        return replyTo;
+    }
+
+    public void setReplyTo(String replyTo) {
+        this.replyTo = replyTo;
     }
 
     public String getStatus() {

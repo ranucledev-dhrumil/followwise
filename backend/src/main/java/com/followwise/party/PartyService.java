@@ -122,6 +122,7 @@ public class PartyService {
                 1,
                 ver.version(),
                 false,
+                false,
                 now,
                 now
         );
@@ -268,6 +269,7 @@ public class PartyService {
                 existing.version() + 1,
                 ver.version(),
                 false,
+                existing.isPaused(),
                 existing.createdAt(),
                 now
         );
@@ -342,6 +344,7 @@ public class PartyService {
                 record.version(),
                 record.definitionVersion(),
                 record.isArchived(),
+                record.isPaused(),
                 record.createdAt(),
                 record.updatedAt()
         );

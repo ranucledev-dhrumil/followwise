@@ -67,9 +67,12 @@ public class BodySizeFilter extends OncePerRequestFilter {
                 || (method.equalsIgnoreCase("POST") && uri.matches("^/api/workspaces/[^/]+/apps/[^/]+/documents/[^/]+/purge/?$"))
                 || (method.equalsIgnoreCase("POST") && uri.matches("^/api/workspaces/[^/]+/apps/[^/]+/document-requests/[^/]+/documents/[^/]+/purge/?$"));
 
+        boolean isReminderTarget = method.equalsIgnoreCase("POST")
+                && uri.matches("^/api/workspaces/[^/]+/apps/[^/]+/parties/[^/]+/reminders/(pause|resume)/?$");
+
         if (isDocumentUploadTarget) {
             limit = maxDocumentBytes;
-        } else if (isDocumentJsonTarget) {
+        } else if (isDocumentJsonTarget || isReminderTarget) {
             limit = DOCUMENT_JSON_MAX_SIZE;
         } else if (isGenerateTarget) {
             limit = 1024;

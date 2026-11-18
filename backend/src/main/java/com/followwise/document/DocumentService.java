@@ -456,16 +456,18 @@ public class DocumentService {
         }
     }
 
-    @Transactional(readOnly = true)
     public DocumentDownload getDocumentDownload(UUID workspaceId, UUID appId, UUID docId, UUID userId) {
         accessService.requirePermission(workspaceId, userId, Permission.VIEW_DOCUMENTS);
 
-        DocumentRecord doc = documentStore.findById(workspaceId, appId, docId)
-                .orElseThrow(() -> new DocumentNotFoundException("Document not found"));
+        DocumentRecord doc = transactionTemplate.execute(status -> {
+            DocumentRecord d = documentStore.findById(workspaceId, appId, docId)
+                    .orElseThrow(() -> new DocumentNotFoundException("Document not found"));
 
-        if (doc.purgedAt() != null) {
-            throw new DocumentGoneException("Document has been purged");
-        }
+            if (d.purgedAt() != null) {
+                throw new DocumentGoneException("Document has been purged");
+            }
+            return d;
+        });
 
         InputStream stream = documentStorage.open(doc.storageKey());
         return new DocumentDownload(doc.originalFilename(), doc.contentType(), doc.sizeBytes(), stream);

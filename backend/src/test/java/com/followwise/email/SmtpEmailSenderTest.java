@@ -44,4 +44,23 @@ class SmtpEmailSenderTest {
         assertThat(output.getAll()).doesNotContain(token);
         assertThat(output.getAll()).doesNotContain("Please click");
     }
+
+    @Test
+    void testReplyToWithCrlfIgnored() {
+        JavaMailSender mailSender = mock(JavaMailSender.class);
+        SmtpEmailSender sender = new SmtpEmailSender(
+                mailSender,
+                "noreply@followwise.com",
+                "FollowWise",
+                "support@followwise.com"
+        );
+
+        sender.send("recipient@example.com", "Subject", "Body", "injected\r\n@example.com");
+
+        ArgumentCaptor<SimpleMailMessage> captor = ArgumentCaptor.forClass(SimpleMailMessage.class);
+        verify(mailSender).send(captor.capture());
+
+        SimpleMailMessage sentMessage = captor.getValue();
+        assertThat(sentMessage.getReplyTo()).isEqualTo("support@followwise.com");
+    }
 }

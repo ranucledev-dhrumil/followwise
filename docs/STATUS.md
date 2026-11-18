@@ -1,16 +1,16 @@
 # STATUS (single status log)
 
 Update this file at the end of every task. It is the first thing every model and the founder reads.
-Last updated: 2026-11-13 by Gemini (PLAN-0013)
+Last updated: 2026-11-18 by Gemini (PLAN-0014 Addendum 4)
 
 ## Current
 | Item | Value |
 |---|---|
 | Product version | **0.1.0 pending** (Phase 0 built; tag v0.1.0 to be re-created on the final main commit after acceptance) |
-| Docs baseline | README v1.2 (decision log D-01 to D-100) |
+| Docs baseline | README v1.2 (decision log D-01 to D-109) |
 | Current phase | **Phase 1: Engine core** |
-| Current step | Phase 1, step 1f |
-| Next task | PLAN-0014: reminder engine (Phase 1, step 1f) |
+| Current step | Phase 1, step 1g |
+| Next task | PLAN-0015: forms and dashboard generation (Phase 1, step 1g) |
 
 ## Version scheme
 - 0.x while building: 0.1.0 = Phase 0 done, 0.2.0 = Phase 1 done, 0.3.0 = Phase 2 done.
@@ -45,7 +45,7 @@ Last updated: 2026-11-13 by Gemini (PLAN-0013)
 - [x] 1d-ii. Charge generation (PLAN-0011)
 - [x] 1e-i. Document storage and requests (PLAN-0012)
 - [x] 1e-ii. Document workflow (PLAN-0013)
-- [ ] 1f. Reminder engine (PLAN-0014)
+- [x] 1f. Reminder engine (PLAN-0014)
 - [ ] 1g. Forms and dashboard generation
 
 ## Founder manual tasks (Phase 0)
@@ -83,6 +83,7 @@ Last updated: 2026-11-13 by Gemini (PLAN-0013)
 ## Task log
 | Date | Task | Done by | Result |
 |---|---|---|---|
+| 2026-11-18 | PLAN-0014: reminder engine + Addenda 1-4 (Phase 1, step 1f) | Gemini 3.8 Flash | Done |
 | 2026-11-13 | PLAN-0013: document workflow (Phase 1, step 1e-ii) | Gemini 3.8 Flash | Done |
 | 2026-11-12 | PLAN-0012: documents and storage (Phase 1, step 1e-i) | Gemini 3.8 Flash | Done |
 | 2026-11-05 | PLAN-0011: charge generation & Addendum 1 (Phase 1, step 1d-ii) | Gemini 3.8 Flash | Done |
@@ -118,6 +119,9 @@ None.
 - Keep it short. Details live in the plan files.
 
 ## Known gaps (not blockers)
+- Retention job for reminder_events and old outbox rows is not in v1 (D-108, D-109).
+- Reminder emails contain no portal links since the portal is not built yet (D-105).
+- Retention of reminder_events and old email_outbox rows needs a controlled purge design because reminder_events is immutable and references email_outbox (Amendment M).
 - Antivirus scanning of uploaded documents is not in v1 (D-100).
 - Orphan storage object sweeper is needed for aborted uploads/failures (D-100).
 - Portal document uploads are deferred to portal phase.
