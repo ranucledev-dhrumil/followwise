@@ -139,3 +139,5 @@ None.
 - Commit 31b527b is labeled "feat: frontend skeleton (PLAN-0005)" but contains the PLAN-0006 changes. Not rewritten; use correct messages from now on.
 - Document download opens the storage stream inside a read-only transaction, which holds a DB connection during the storage request. Fixed in PLAN-0014 slice 0.
 - Tests need a healthy Docker. If a run fails in bulk (many errors after about 100 tests), restart Docker Desktop and capture the first error line before anything else.
+- Lease reminders cast a party date field with ::date after a regex filter; a malformed stored value (only possible through direct SQL edits) could fail that query. Reminder scans are capped at 5000 candidates per rule per run.
+- Index ledger_entries(charge_id) is added in PLAN-0015 (V11).
