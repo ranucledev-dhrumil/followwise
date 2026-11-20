@@ -26,6 +26,7 @@ import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.time.*;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
@@ -262,176 +263,519 @@ class DashboardApiTest extends AbstractIntegrationTest {
     }
 
     @Test
-    void testDashboardWidgetsComprehensive() throws Exception {
+    void testFormsAndDashboardSendNoStore() throws Exception {
         UUID appId = createRentalApp(workspace1Id, "America/New_York");
-        LocalDate today = LocalDate.now(ZoneId.of("America/New_York"));
-        YearMonth thisMonth = YearMonth.from(today);
-        LocalDate monthStart = thisMonth.atDay(1);
-        LocalDate monthEnd = thisMonth.atEndOfMonth();
 
-        // 1. Create 3 active parties + 1 archived party
-        PartyResponse p1 = partyService.createParty(workspace1Id, appId, ownerId, "tenant",
+        // GET /forms returns 200 with Cache-Control: private, no-store
+        mockMvc.perform(get("/api/workspaces/" + workspace1Id + "/apps/" + appId + "/forms")
+                        .header("Authorization", "Bearer " + ownerToken))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Cache-Control", "private, no-store"));
+
+        // GET /dashboard returns 200 with Cache-Control: private, no-store
+        mockMvc.perform(get("/api/workspaces/" + workspace1Id + "/apps/" + appId + "/dashboard")
+                        .header("Authorization", "Bearer " + ownerToken))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Cache-Control", "private, no-store"));
+
+        // GET /forms with PORTAL_USER returns 403 with Cache-Control: private, no-store
+        mockMvc.perform(get("/api/workspaces/" + workspace1Id + "/apps/" + appId + "/forms")
+                        .header("Authorization", "Bearer " + portalToken))
+                .andExpect(status().isForbidden())
+                .andExpect(header().string("Cache-Control", "private, no-store"));
+
+        // GET /dashboard with PORTAL_USER returns 403 with Cache-Control: private, no-store
+        mockMvc.perform(get("/api/workspaces/" + workspace1Id + "/apps/" + appId + "/dashboard")
+                        .header("Authorization", "Bearer " + portalToken))
+                .andExpect(status().isForbidden())
+                .andExpect(header().string("Cache-Control", "private, no-store"));
+    }
+
+    private PartyResponse createTenant(UUID appId, String name, String email, LocalDate leaseEnd) {
+        return partyService.createParty(workspace1Id, appId, ownerId, "tenant",
                 jsonMapper.createObjectNode()
-                        .put("name", "Alice Active")
-                        .put("email", "alice@example.com")
+                        .put("name", name)
+                        .put("email", email)
                         .put("monthly_rent", 100000)
                         .put("due_day", 1)
                         .put("lease_start", "2024-01-01")
-                        .put("lease_end", today.plusDays(10).toString()) // expiring lease on day 10
+                        .put("lease_end", leaseEnd != null ? leaseEnd.toString() : "2025-01-01")
         );
-        PartyResponse p2 = partyService.createParty(workspace1Id, appId, ownerId, "tenant",
-                jsonMapper.createObjectNode()
-                        .put("name", "Bob Active")
-                        .put("email", "bob@example.com")
-                        .put("monthly_rent", 200000)
-                        .put("due_day", 1)
-                        .put("lease_start", "2024-01-01")
-                        .put("lease_end", today.plusDays(60).toString()) // expiring lease on day 60 (included)
-        );
-        PartyResponse p3 = partyService.createParty(workspace1Id, appId, ownerId, "tenant",
-                jsonMapper.createObjectNode()
-                        .put("name", "Charlie Active")
-                        .put("email", "charlie@example.com")
-                        .put("monthly_rent", 150000)
-                        .put("due_day", 1)
-                        .put("lease_start", "2024-01-01")
-                        .put("lease_end", today.plusDays(61).toString()) // expiring lease on day 61 (EXCLUDED from expiring)
-        );
-        PartyResponse pArchived = partyService.createParty(workspace1Id, appId, ownerId, "tenant",
-                jsonMapper.createObjectNode()
-                        .put("name", "Dave Archived")
-                        .put("email", "dave@example.com")
-                        .put("monthly_rent", 300000)
-                        .put("due_day", 1)
-                        .put("lease_start", "2024-01-01")
-                        .put("lease_end", today.plusDays(5).toString())
-        );
-        partyService.archiveParty(workspace1Id, appId, pArchived.id(), ownerId);
+    }
 
-        // 2. Insert Charges & Payments for Ledger widgets
-        // Charge 1 on Alice: overdue (due 5 days ago), amount 100000, partially paid 30000 -> outstanding 70000
-        UUID c1 = UUID.randomUUID();
-        LocalDate duePast = today.minusDays(5);
-        insertCharge(c1, p1.id(), appId, 100000, "recurring", duePast);
-        UUID pay1 = UUID.randomUUID();
-        insertPayment(pay1, c1, p1.id(), appId, -30000, duePast.plusDays(1));
+    private PartyResponse createTenant(UUID appId, String name, String email) {
+        return createTenant(appId, name, email, null);
+    }
 
-        // Charge 2 on Bob: overdue (due 2 days ago), amount 50000, unpaid -> outstanding 50000
-        // Plus a late-fee charge on Bob (due 1 day ago), amount 5000, unpaid -> outstanding 5000
-        UUID c2 = UUID.randomUUID();
-        insertCharge(c2, p2.id(), appId, 50000, "recurring", today.minusDays(2));
-        UUID cLateFee = UUID.randomUUID();
-        insertCharge(cLateFee, p2.id(), appId, 5000, "late_fee", today.minusDays(1));
+    private UUID insertRawParty(UUID appId, String partyType, String displayName, String dataJson) {
+        UUID id = UUID.randomUUID();
+        jdbcClient.sql("""
+                INSERT INTO parties (
+                    id, workspace_id, app_id, party_type, display_name, data,
+                    definition_version, version, created_by, updated_by, created_at, updated_at
+                ) VALUES (
+                    :id, :wid, :aid, :partyType, :name, CAST(:data AS jsonb),
+                    1, 1, :uid, :uid, NOW(), NOW()
+                )
+                """)
+                .param("id", id)
+                .param("wid", workspace1Id)
+                .param("aid", appId)
+                .param("partyType", partyType)
+                .param("name", displayName)
+                .param("data", dataJson)
+                .param("uid", ownerId)
+                .update();
+        return id;
+    }
 
-        // Charge 3 on Charlie: due TODAY (due_date == today) -> NOT overdue!
-        UUID c3 = UUID.randomUUID();
-        insertCharge(c3, p3.id(), appId, 80000, "recurring", today);
+    @Test
+    void testCountAndSumOverdueChargesBoundaries() throws Exception {
+        UUID appId = createRentalApp(workspace1Id, "America/New_York");
+        LocalDate today = LocalDate.now(ZoneId.of("America/New_York"));
 
-        // Charge 4 on Charlie: due in future (today + 5 days) -> NOT overdue!
-        UUID c4 = UUID.randomUUID();
-        insertCharge(c4, p3.id(), appId, 90000, "recurring", today.plusDays(5));
+        PartyResponse tenant = createTenant(appId, "Tenant Party", "t@example.com");
 
-        // Charge 5 on Alice: overdue (due 10 days ago), amount 60000, fully paid -> outstanding 0 -> NOT overdue!
-        UUID c5 = UUID.randomUUID();
-        insertCharge(c5, p1.id(), appId, 60000, "recurring", today.minusDays(10));
-        UUID pay5 = UUID.randomUUID();
-        insertPayment(pay5, c5, p1.id(), appId, -60000, today.minusDays(8));
+        PartyResponse archivedTenant = createTenant(appId, "Archived Tenant", "at@example.com");
+        partyService.archiveParty(workspace1Id, appId, archivedTenant.id(), ownerId);
 
-        // Charge 6 on Bob: overdue, but REVERSED -> excluded from overdue and expected!
-        UUID c6 = UUID.randomUUID();
-        insertCharge(c6, p2.id(), appId, 70000, "recurring", today.minusDays(3));
-        UUID rev6 = UUID.randomUUID();
-        insertReversal(rev6, c6, c6, p2.id(), appId, -70000);
+        UUID vendorId = insertRawParty(appId, "vendor", "Vendor Party", "{}");
 
-        // Charge 7 on Archived party: overdue -> must be EXCLUDED because party is archived!
+        // 1. Due before today, unpaid -> overdue! (amount 100000, outstanding 100000)
+        UUID cBefore = UUID.randomUUID();
+        insertCharge(cBefore, tenant.id(), appId, 100000, "recurring", today.minusDays(5));
+
+        // 2. Due before today, partly paid -> overdue for remainder! (amount 80000, paid 30000, outstanding 50000)
+        UUID cPartly = UUID.randomUUID();
+        insertCharge(cPartly, tenant.id(), appId, 80000, "recurring", today.minusDays(3));
+        insertPayment(UUID.randomUUID(), cPartly, tenant.id(), appId, -30000, today.minusDays(2));
+
+        // 3. Due before today, fully paid -> outstanding 0, NOT overdue!
+        UUID cFully = UUID.randomUUID();
+        insertCharge(cFully, tenant.id(), appId, 60000, "recurring", today.minusDays(4));
+        insertPayment(UUID.randomUUID(), cFully, tenant.id(), appId, -60000, today.minusDays(2));
+
+        // 4. Due before today, reversed charge -> NOT overdue!
+        UUID cRev = UUID.randomUUID();
+        insertCharge(cRev, tenant.id(), appId, 70000, "recurring", today.minusDays(6));
+        insertReversal(UUID.randomUUID(), cRev, cRev, tenant.id(), appId, -70000);
+
+        // 5. Due before today, archived party -> NOT overdue!
         UUID cArchived = UUID.randomUUID();
-        insertCharge(cArchived, pArchived.id(), appId, 40000, "recurring", today.minusDays(4));
+        insertCharge(cArchived, archivedTenant.id(), appId, 40000, "recurring", today.minusDays(2));
 
-        // Charge 8 on Alice: due on first day of selected month (monthStart)
-        UUID cMonthStart = UUID.randomUUID();
-        insertCharge(cMonthStart, p1.id(), appId, 11000, "recurring", monthStart);
+        // 6. Due before today, late-fee kind -> overdue! (amount 5000, outstanding 5000)
+        UUID cLateFee = UUID.randomUUID();
+        insertCharge(cLateFee, tenant.id(), appId, 5000, "late_fee", today.minusDays(1));
 
-        // Charge 9 on Alice: due on last day of selected month (monthEnd)
-        UUID cMonthEnd = UUID.randomUUID();
-        insertCharge(cMonthEnd, p1.id(), appId, 22000, "recurring", monthEnd);
+        // 7. Due TODAY (due_date == today) -> NOT overdue!
+        UUID cToday = UUID.randomUUID();
+        insertCharge(cToday, tenant.id(), appId, 90000, "recurring", today);
 
-        // Payment inside month: paid on monthStart, amount 15000
-        UUID payInMonth1 = UUID.randomUUID();
-        insertPayment(payInMonth1, cMonthStart, p1.id(), appId, -15000, monthStart);
+        // 8. Due after today (future) -> NOT overdue!
+        UUID cAfter = UUID.randomUUID();
+        insertCharge(cAfter, tenant.id(), appId, 95000, "recurring", today.plusDays(2));
 
-        // Payment inside month: paid on monthEnd, amount 25000
-        UUID payInMonth2 = UUID.randomUUID();
-        insertPayment(payInMonth2, cMonthEnd, p1.id(), appId, -25000, monthEnd);
+        // 9. Due before today on vendor party
+        UUID cVendor = UUID.randomUUID();
+        insertCharge(cVendor, vendorId, appId, 20000, "recurring", today.minusDays(3));
 
-        // Payment inside month: paid on monthStart + 1, amount 35000, BUT REVERSED -> excluded from collected!
-        UUID payReversed = UUID.randomUUID();
-        insertPayment(payReversed, cMonthStart, p1.id(), appId, -35000, monthStart.plusDays(1));
-        UUID revPayment = UUID.randomUUID();
-        insertReversal(revPayment, cMonthStart, payReversed, p1.id(), appId, 35000);
+        // When partyType = "tenant":
+        // Overdue charges: cBefore (100000), cPartly (50000), cLateFee (5000) -> count = 3, sum = 155000
+        assertEquals(3L, dashboardStore.countOverdueCharges(workspace1Id, appId, "tenant", today));
+        assertEquals(155000L, dashboardStore.sumOverdueCharges(workspace1Id, appId, "tenant", today));
 
-        // Payment outside month (monthStart - 1 day) -> excluded from collected!
-        UUID payOutsideMonth = UUID.randomUUID();
-        insertPayment(payOutsideMonth, cMonthStart, p1.id(), appId, -45000, monthStart.minusDays(1));
+        // When partyType = null (all party types):
+        // Adds cVendor (20000) -> count = 4, sum = 175000
+        assertEquals(4L, dashboardStore.countOverdueCharges(workspace1Id, appId, null, today));
+        assertEquals(175000L, dashboardStore.sumOverdueCharges(workspace1Id, appId, null, today));
+    }
 
-        // Now run GET /dashboard?month=YYYY-MM
-        MvcResult res = mockMvc.perform(get("/api/workspaces/" + workspace1Id + "/apps/" + appId + "/dashboard?month=" + thisMonth)
+    @Test
+    void testSumExpectedPeriodMonthBoundaries() throws Exception {
+        UUID appId = createRentalApp(workspace1Id, "America/New_York");
+        LocalDate today = LocalDate.now(ZoneId.of("America/New_York"));
+        YearMonth ym = YearMonth.from(today);
+        LocalDate monthStart = ym.atDay(1);
+        LocalDate monthEnd = ym.atEndOfMonth();
+
+        PartyResponse tenant = createTenant(appId, "Tenant Expected", "exp@example.com");
+
+        // Day just outside before: monthStart - 1 day (excluded)
+        insertCharge(UUID.randomUUID(), tenant.id(), appId, 10000, "recurring", monthStart.minusDays(1));
+
+        // First day of month: monthStart (included: 20000)
+        insertCharge(UUID.randomUUID(), tenant.id(), appId, 20000, "recurring", monthStart);
+
+        // Middle of month (included: 30000)
+        insertCharge(UUID.randomUUID(), tenant.id(), appId, 30000, "recurring", monthStart.plusDays(10));
+
+        // Last day of month: monthEnd (included: 40000)
+        insertCharge(UUID.randomUUID(), tenant.id(), appId, 40000, "recurring", monthEnd);
+
+        // Day just outside after: monthEnd + 1 day (excluded)
+        insertCharge(UUID.randomUUID(), tenant.id(), appId, 50000, "recurring", monthEnd.plusDays(1));
+
+        // Charge in month but reversed (excluded!)
+        UUID cRev = UUID.randomUUID();
+        insertCharge(cRev, tenant.id(), appId, 60000, "recurring", monthStart.plusDays(5));
+        insertReversal(UUID.randomUUID(), cRev, cRev, tenant.id(), appId, -60000);
+
+        // Total expected = 20000 + 30000 + 40000 = 90000
+        long sumExpected = dashboardStore.sumExpectedPeriod(workspace1Id, appId, "tenant", monthStart, monthEnd);
+        assertEquals(90000L, sumExpected);
+    }
+
+    @Test
+    void testSumCollectedPeriodUsesPaidOnAndExcludesReversedPayments() throws Exception {
+        UUID appId = createRentalApp(workspace1Id, "America/New_York");
+        LocalDate today = LocalDate.now(ZoneId.of("America/New_York"));
+        YearMonth ym = YearMonth.from(today);
+        LocalDate monthStart = ym.atDay(1);
+        LocalDate monthEnd = ym.atEndOfMonth();
+
+        PartyResponse tenant = createTenant(appId, "Tenant Collected", "col@example.com");
+
+        PartyResponse archivedTenant = createTenant(appId, "Archived Tenant Col", "acol@example.com");
+        partyService.archiveParty(workspace1Id, appId, archivedTenant.id(), ownerId);
+
+        // 1. Charge due last month, but paid IN THIS MONTH (counts!)
+        UUID cLastMonth = UUID.randomUUID();
+        insertCharge(cLastMonth, tenant.id(), appId, 50000, "recurring", monthStart.minusMonths(1));
+        insertPayment(UUID.randomUUID(), cLastMonth, tenant.id(), appId, -50000, monthStart.plusDays(2));
+
+        // 2. Charge due in this month, paid IN NEXT MONTH (does NOT count this month!)
+        UUID cThisMonth = UUID.randomUUID();
+        insertCharge(cThisMonth, tenant.id(), appId, 40000, "recurring", monthStart.plusDays(10));
+        insertPayment(UUID.randomUUID(), cThisMonth, tenant.id(), appId, -40000, monthEnd.plusDays(1));
+
+        // 3. Payment in this month, but REVERSED (excluded!)
+        UUID cRevPay = UUID.randomUUID();
+        insertCharge(cRevPay, tenant.id(), appId, 30000, "recurring", monthStart.plusDays(3));
+        UUID pRev = UUID.randomUUID();
+        insertPayment(pRev, cRevPay, tenant.id(), appId, -30000, monthStart.plusDays(5));
+        insertReversal(UUID.randomUUID(), cRevPay, pRev, tenant.id(), appId, 30000);
+
+        // 4. Payment in this month on archived party (excluded!)
+        UUID cArch = UUID.randomUUID();
+        insertCharge(cArch, archivedTenant.id(), appId, 25000, "recurring", monthStart.plusDays(4));
+        insertPayment(UUID.randomUUID(), cArch, archivedTenant.id(), appId, -25000, monthStart.plusDays(6));
+
+        // 5. Payment on first day of month (counts: +10000)
+        UUID cStart = UUID.randomUUID();
+        insertCharge(cStart, tenant.id(), appId, 10000, "recurring", monthStart);
+        insertPayment(UUID.randomUUID(), cStart, tenant.id(), appId, -10000, monthStart);
+
+        // 6. Payment on last day of month (counts: +20000)
+        UUID cEnd = UUID.randomUUID();
+        insertCharge(cEnd, tenant.id(), appId, 20000, "recurring", monthEnd);
+        insertPayment(UUID.randomUUID(), cEnd, tenant.id(), appId, -20000, monthEnd);
+
+        // Total collected = 50000 + 10000 + 20000 = 80000
+        long collected = dashboardStore.sumCollectedPeriod(workspace1Id, appId, "tenant", monthStart, monthEnd);
+        assertEquals(80000L, collected);
+    }
+
+    @Test
+    void testListOverduePartiesOrderingTiesAndCap() throws Exception {
+        UUID appId = createRentalApp(workspace1Id, "America/New_York");
+        LocalDate today = LocalDate.now(ZoneId.of("America/New_York"));
+
+        List<UUID> partyIds = new ArrayList<>();
+        for (int i = 0; i < 25; i++) {
+            UUID pid = insertRawParty(appId, "tenant", "Party " + i, "{}");
+            partyIds.add(pid);
+
+            long amount = (i == 0) ? 100000 : 50000;
+            UUID cid = UUID.randomUUID();
+            insertCharge(cid, pid, appId, amount, "recurring", today.minusDays(10 + i));
+            if (i == 0) {
+                insertCharge(UUID.randomUUID(), pid, appId, 5000, "late_fee", today.minusDays(5));
+            }
+        }
+
+        var result = dashboardStore.listOverdueParties(workspace1Id, appId, "tenant", today);
+        assertEquals(25L, result.totalCount());
+        assertEquals(20, result.items().size());
+
+        // Party 0 has 105000 overdue (2 charges, oldest due date = today - 10)
+        assertEquals(partyIds.get(0), result.items().get(0).partyId());
+        assertEquals(105000L, result.items().get(0).overdueCents());
+        assertEquals(2L, result.items().get(0).overdueChargeCount());
+        assertEquals(today.minusDays(10), result.items().get(0).oldestDueDate());
+
+        // Tied parties sorted deterministically by partyId
+        for (int i = 1; i < 19; i++) {
+            var itemA = result.items().get(i);
+            var itemB = result.items().get(i + 1);
+            assertEquals(50000L, itemA.overdueCents());
+            assertEquals(50000L, itemB.overdueCents());
+            assertTrue(itemA.partyId().toString().compareTo(itemB.partyId().toString()) < 0);
+        }
+    }
+
+    @Test
+    void testListExpiringLeasesWindowDays0And60And61() throws Exception {
+        UUID appId = createRentalApp(workspace1Id, "America/New_York");
+        LocalDate today = LocalDate.now(ZoneId.of("America/New_York"));
+
+        // Day 0 (today) -> included, daysLeft = 0
+        PartyResponse p0 = createTenant(appId, "Lease Day 0", "l0@example.com", today);
+
+        // Day 60 (today + 60) -> included, daysLeft = 60
+        PartyResponse p60 = createTenant(appId, "Lease Day 60", "l60@example.com", today.plusDays(60));
+
+        // Day 61 (today + 61) -> excluded!
+        createTenant(appId, "Lease Day 61", "l61@example.com", today.plusDays(61));
+
+        // Missing date field -> excluded!
+        insertRawParty(appId, "tenant", "Lease Missing Date", "{}");
+
+        // Non-ISO date value -> excluded!
+        insertRawParty(appId, "tenant", "Lease Non-ISO", "{\"lease_end\":\"not-a-date\"}");
+
+        // Impossible date value (e.g. 2026-13-45) -> excluded!
+        insertRawParty(appId, "tenant", "Lease Impossible", "{\"lease_end\":\"2026-13-45\"}");
+
+        var result = dashboardStore.listExpiringLeases(workspace1Id, appId, "tenant", "lease_end", today, today.plusDays(60));
+        assertEquals(2L, result.totalCount());
+        assertEquals(2, result.items().size());
+        assertEquals(p0.id(), result.items().get(0).partyId());
+        assertEquals(0, result.items().get(0).daysLeft());
+        assertEquals(p60.id(), result.items().get(1).partyId());
+        assertEquals(60, result.items().get(1).daysLeft());
+    }
+
+    @Test
+    void testListMissingDocsRejectedCancelledAndNullDueDateOrdering() throws Exception {
+        UUID appId = createClientDocApp(workspace1Id, "America/New_York");
+        LocalDate today = LocalDate.now(ZoneId.of("America/New_York"));
+
+        PartyResponse p1 = partyService.createParty(workspace1Id, appId, ownerId, "client",
+                jsonMapper.createObjectNode().put("name", "Party PENDING due-5").put("email", "p1@example.com"));
+        PartyResponse p2 = partyService.createParty(workspace1Id, appId, ownerId, "client",
+                jsonMapper.createObjectNode().put("name", "Party REJECTED due-2").put("email", "p2@example.com"));
+        PartyResponse pNull = partyService.createParty(workspace1Id, appId, ownerId, "client",
+                jsonMapper.createObjectNode().put("name", "Party NULL Due Date").put("email", "pnull@example.com"));
+        PartyResponse pCancelled = partyService.createParty(workspace1Id, appId, ownerId, "client",
+                jsonMapper.createObjectNode().put("name", "Party Cancelled").put("email", "pc@example.com"));
+
+        // p1 has PENDING request due 5 days ago
+        insertDocRequest(UUID.randomUUID(), workspace1Id, appId, p1.id(), "onboarding_docs", "doc1", "Doc 1", true, today.minusDays(5), "PENDING", null);
+
+        // p2 has REJECTED request due 2 days ago
+        insertDocRequest(UUID.randomUUID(), workspace1Id, appId, p2.id(), "onboarding_docs", "doc2", "Doc 2", true, today.minusDays(2), "REJECTED", null);
+
+        // pNull has PENDING request with null due date
+        insertDocRequest(UUID.randomUUID(), workspace1Id, appId, pNull.id(), "onboarding_docs", "doc3", "Doc 3", true, null, "PENDING", null);
+
+        // pCancelled has cancelled request (must be excluded!)
+        insertCancelledDocRequest(UUID.randomUUID(), workspace1Id, appId, pCancelled.id(), "onboarding_docs", "doc4", "Doc 4", true, today.minusDays(10), "PENDING");
+
+        var result = dashboardStore.listMissingDocs(workspace1Id, appId, "client");
+        assertEquals(3L, result.totalCount());
+        assertEquals(3, result.items().size());
+
+        // Order: oldest due date ASC NULLS LAST -> p1 (due-5), then p2 (due-2), then pNull (null due date last)
+        assertEquals(p1.id(), result.items().get(0).partyId());
+        assertEquals(today.minusDays(5), result.items().get(0).oldestDueDate());
+        assertEquals(p2.id(), result.items().get(1).partyId());
+        assertEquals(today.minusDays(2), result.items().get(1).oldestDueDate());
+        assertEquals(pNull.id(), result.items().get(2).partyId());
+        assertNull(result.items().get(2).oldestDueDate());
+    }
+
+    @Test
+    void testListExpiringDocsWindowDays0And30And31() throws Exception {
+        UUID appId = createClientDocApp(workspace1Id, "America/New_York");
+        LocalDate today = LocalDate.now(ZoneId.of("America/New_York"));
+
+        PartyResponse client = partyService.createParty(workspace1Id, appId, ownerId, "client",
+                jsonMapper.createObjectNode().put("name", "Client Expiring Docs").put("email", "expdocs@example.com"));
+
+        // Day 0: expires today (included, daysLeft = 0)
+        UUID r0 = UUID.randomUUID();
+        insertDocRequest(r0, workspace1Id, appId, client.id(), "onboarding_docs", "doc0", "Doc Day 0", true, today, "APPROVED", today);
+
+        // Day 30: expires today + 30 (included, daysLeft = 30)
+        UUID r30 = UUID.randomUUID();
+        insertDocRequest(r30, workspace1Id, appId, client.id(), "onboarding_docs", "doc30", "Doc Day 30", true, today, "APPROVED", today.plusDays(30));
+
+        // Day 31: expires today + 31 (excluded!)
+        UUID r31 = UUID.randomUUID();
+        insertDocRequest(r31, workspace1Id, appId, client.id(), "onboarding_docs", "doc31", "Doc Day 31", true, today, "APPROVED", today.plusDays(31));
+
+        // PENDING request (only APPROVED counts, so excluded!)
+        UUID rPending = UUID.randomUUID();
+        insertDocRequest(rPending, workspace1Id, appId, client.id(), "onboarding_docs", "docP", "Doc Pending", true, today, "PENDING", null);
+
+        var result = dashboardStore.listExpiringDocs(workspace1Id, appId, "client", today, today.plusDays(30));
+        assertEquals(2L, result.totalCount());
+        assertEquals(2, result.items().size());
+        assertEquals(r0, result.items().get(0).requestId());
+        assertEquals(0, result.items().get(0).daysLeft());
+        assertEquals(r30, result.items().get(1).requestId());
+        assertEquals(30, result.items().get(1).daysLeft());
+    }
+
+    @Test
+    void testCompletionPctFloorAndZeroDenominator() throws Exception {
+        UUID appId = createClientDocApp(workspace1Id, "America/New_York");
+        LocalDate today = LocalDate.now(ZoneId.of("America/New_York"));
+
+        // First test zero denominator: no required requests
+        var emptyResult = dashboardStore.completionPctByParty(workspace1Id, appId, "client");
+        assertEquals(0L, emptyResult.totalCount());
+        assertEquals(0, emptyResult.overallPct());
+        assertEquals(0, emptyResult.items().size());
+
+        // Party with 2 approved out of 3 required requests: floor(200 / 3) = 66
+        PartyResponse p1 = partyService.createParty(workspace1Id, appId, ownerId, "client",
+                jsonMapper.createObjectNode().put("name", "Client 2 of 3").put("email", "c23@example.com"));
+        insertDocRequest(UUID.randomUUID(), workspace1Id, appId, p1.id(), "onboarding_docs", "d1", "Doc 1", true, today, "APPROVED", null);
+        insertDocRequest(UUID.randomUUID(), workspace1Id, appId, p1.id(), "onboarding_docs", "d2", "Doc 2", true, today, "APPROVED", null);
+        insertDocRequest(UUID.randomUUID(), workspace1Id, appId, p1.id(), "onboarding_docs", "d3", "Doc 3", true, today, "PENDING", null);
+
+        var result = dashboardStore.completionPctByParty(workspace1Id, appId, "client");
+        assertEquals(1L, result.totalCount());
+        assertEquals(1, result.items().size());
+        assertEquals(66, result.items().get(0).pct());
+        assertEquals(66, result.overallPct());
+    }
+
+    @Test
+    void testCountOverdueDocs() throws Exception {
+        UUID appId = createClientDocApp(workspace1Id, "America/New_York");
+        LocalDate today = LocalDate.now(ZoneId.of("America/New_York"));
+
+        PartyResponse client = partyService.createParty(workspace1Id, appId, ownerId, "client",
+                jsonMapper.createObjectNode().put("name", "Client Overdue Docs").put("email", "overdue@example.com"));
+
+        PartyResponse archivedClient = partyService.createParty(workspace1Id, appId, ownerId, "client",
+                jsonMapper.createObjectNode().put("name", "Archived Client").put("email", "archived@example.com"));
+        partyService.archiveParty(workspace1Id, appId, archivedClient.id(), ownerId);
+
+        // 1. Required, PENDING, due before today -> counted!
+        insertDocRequest(UUID.randomUUID(), workspace1Id, appId, client.id(), "onboarding_docs", "d1", "Doc 1", true, today.minusDays(3), "PENDING", null);
+
+        // 2. Required, REJECTED, due before today -> counted!
+        insertDocRequest(UUID.randomUUID(), workspace1Id, appId, client.id(), "onboarding_docs", "d2", "Doc 2", true, today.minusDays(1), "REJECTED", null);
+
+        // 3. Due TODAY -> not overdue!
+        insertDocRequest(UUID.randomUUID(), workspace1Id, appId, client.id(), "onboarding_docs", "d3", "Doc 3", true, today, "PENDING", null);
+
+        // 4. Cancelled -> not counted!
+        insertCancelledDocRequest(UUID.randomUUID(), workspace1Id, appId, client.id(), "onboarding_docs", "d4", "Doc 4", true, today.minusDays(5), "PENDING");
+
+        // 5. Not required (optional) -> not counted!
+        insertDocRequest(UUID.randomUUID(), workspace1Id, appId, client.id(), "onboarding_docs", "d5", "Doc 5", false, today.minusDays(4), "PENDING", null);
+
+        // 6. APPROVED -> not counted!
+        insertDocRequest(UUID.randomUUID(), workspace1Id, appId, client.id(), "onboarding_docs", "d6", "Doc 6", true, today.minusDays(2), "APPROVED", null);
+
+        // 7. On archived party -> not counted!
+        insertDocRequest(UUID.randomUUID(), workspace1Id, appId, archivedClient.id(), "onboarding_docs", "d7", "Doc 7", true, today.minusDays(3), "PENDING", null);
+
+        long count = dashboardStore.countOverdueDocs(workspace1Id, appId, "client", today);
+        assertEquals(2L, count);
+    }
+
+    @Test
+    void testWidgetWithoutPartyTypeCoversAllPartyTypes() throws Exception {
+        UUID appId = createRentalApp(workspace1Id, "America/New_York");
+        LocalDate today = LocalDate.now(ZoneId.of("America/New_York"));
+
+        PartyResponse tenant = createTenant(appId, "Tenant Party", "tenant@example.com");
+
+        UUID vendorId = insertRawParty(appId, "vendor", "Vendor Party", "{}");
+
+        // 1 overdue charge on tenant
+        insertCharge(UUID.randomUUID(), tenant.id(), appId, 10000, "recurring", today.minusDays(2));
+        // 1 overdue charge on vendor
+        insertCharge(UUID.randomUUID(), vendorId, appId, 20000, "recurring", today.minusDays(3));
+
+        // When partyType is null, covers both party types
+        long count = dashboardStore.countOverdueCharges(workspace1Id, appId, null, today);
+        assertEquals(2L, count);
+        long sum = dashboardStore.sumOverdueCharges(workspace1Id, appId, null, today);
+        assertEquals(30000L, sum);
+    }
+
+    @Test
+    void testAllListWidgetsCapAt20WithTotalCount() throws Exception {
+        UUID appId = createClientDocApp(workspace1Id, "America/New_York");
+        LocalDate today = LocalDate.now(ZoneId.of("America/New_York"));
+
+        for (int i = 0; i < 25; i++) {
+            PartyResponse client = partyService.createParty(workspace1Id, appId, ownerId, "client",
+                    jsonMapper.createObjectNode().put("name", "Client " + i).put("email", "client" + i + "@example.com"));
+
+            insertDocRequest(UUID.randomUUID(), workspace1Id, appId, client.id(), "onboarding_docs", "d" + i, "Doc " + i, true, today.minusDays(1), "PENDING", null);
+            insertDocRequest(UUID.randomUUID(), workspace1Id, appId, client.id(), "onboarding_docs", "exp" + i, "Exp " + i, true, today.plusDays(10), "APPROVED", today.plusDays(10));
+        }
+
+        var missing = dashboardStore.listMissingDocs(workspace1Id, appId, "client");
+        assertEquals(25L, missing.totalCount());
+        assertEquals(20, missing.items().size());
+
+        var expiring = dashboardStore.listExpiringDocs(workspace1Id, appId, "client", today, today.plusDays(30));
+        assertEquals(25L, expiring.totalCount());
+        assertEquals(20, expiring.items().size());
+
+        var completion = dashboardStore.completionPctByParty(workspace1Id, appId, "client");
+        assertEquals(25L, completion.totalCount());
+        assertEquals(20, completion.items().size());
+    }
+
+    @Test
+    void testDashboardLabelsComeFromFixedTable() {
+        assertEquals("Overdue charges", DashboardService.WIDGET_LABELS.get("count_overdue_charges"));
+        assertEquals("Overdue amount", DashboardService.WIDGET_LABELS.get("sum_overdue_charges"));
+        assertEquals("Expected (selected month)", DashboardService.WIDGET_LABELS.get("sum_expected_period"));
+        assertEquals("Collected (selected month)", DashboardService.WIDGET_LABELS.get("sum_collected_period"));
+        assertEquals("Overdue parties", DashboardService.WIDGET_LABELS.get("list_overdue_parties"));
+        assertEquals("Leases ending soon", DashboardService.WIDGET_LABELS.get("list_expiring_leases"));
+        assertEquals("Missing documents", DashboardService.WIDGET_LABELS.get("list_missing_docs"));
+        assertEquals("Documents expiring soon", DashboardService.WIDGET_LABELS.get("list_expiring_docs"));
+        assertEquals("Document completion", DashboardService.WIDGET_LABELS.get("completion_pct_by_party"));
+        assertEquals("Overdue documents", DashboardService.WIDGET_LABELS.get("count_overdue_docs"));
+        assertEquals(10, DashboardService.WIDGET_LABELS.size());
+    }
+
+    @Test
+    void testResponsesContainNoEmailPhoneOrStorageKey() throws Exception {
+        UUID appId = createRentalApp(workspace1Id, "America/New_York");
+
+        partyService.createParty(workspace1Id, appId, ownerId, "tenant",
+                jsonMapper.createObjectNode()
+                        .put("name", "John Secret")
+                        .put("email", "john.secret@example.com")
+                        .put("phone", "+1 555-123-4567")
+                        .put("monthly_rent", 100000)
+                        .put("due_day", 1)
+                        .put("lease_start", "2024-01-01")
+                        .put("lease_end", "2024-12-31")
+        );
+
+        MvcResult formsRes = mockMvc.perform(get("/api/workspaces/" + workspace1Id + "/apps/" + appId + "/forms")
                         .header("Authorization", "Bearer " + ownerToken))
                 .andExpect(status().isOk())
                 .andReturn();
+        String formsRaw = formsRes.getResponse().getContentAsString(StandardCharsets.UTF_8);
+        assertFalse(formsRaw.contains("john.secret@example.com"));
+        assertFalse(formsRaw.contains("555-123-4567"));
+        assertFalse(formsRaw.contains("storageKey"));
+        assertFalse(formsRaw.contains("storage_key"));
 
-        JsonNode root = jsonMapper.readTree(res.getResponse().getContentAsString(StandardCharsets.UTF_8));
-        JsonNode widgets = root.get("widgets");
-
-        // Verify count_overdue_charges:
-        // Overdue charges: c1 (Alice, 70000 left), c2 (Bob, 50000 left), cLateFee (Bob, 5000 left) -> count = 3!
-        // (c3 is due today, c4 is future, c5 is fully paid, c6 is reversed, cArchived is archived party)
-        JsonNode countOverdue = findWidget(widgets, "count_overdue");
-        assertEquals("OK", countOverdue.get("status").asText());
-        assertEquals("Overdue charges", countOverdue.get("label").asText());
-        assertEquals(3L, countOverdue.get("data").get("count").asLong());
-
-        // Verify sum_overdue_charges via dashboardStore:
-        // Outstanding cents: 70000 + 50000 + 5000 = 125000!
-        long sumOverdue = dashboardStore.sumOverdueCharges(workspace1Id, appId, "tenant", today);
-        assertEquals(125000L, sumOverdue);
-
-        // Verify list_overdue:
-        // Alice has overdue 70000 (1 charge, oldestDueDate = duePast)
-        // Bob has overdue 55000 (2 charges: c2 due -2, cLateFee due -1, oldestDueDate = today - 2)
-        // Ordered by overdue cents DESC: Alice (70000) first, Bob (55000) second!
-        JsonNode listOverdue = findWidget(widgets, "list_overdue");
-        assertEquals(2L, listOverdue.get("data").get("totalCount").asLong());
-        ArrayNode overdueItems = (ArrayNode) listOverdue.get("data").get("items");
-        assertEquals(2, overdueItems.size());
-        assertEquals(p1.id().toString(), overdueItems.get(0).get("partyId").asText());
-        assertEquals("Alice Active", overdueItems.get(0).get("displayName").asText());
-        assertEquals(70000L, overdueItems.get(0).get("overdueCents").asLong());
-        assertEquals(1L, overdueItems.get(0).get("overdueChargeCount").asLong());
-
-        assertEquals(p2.id().toString(), overdueItems.get(1).get("partyId").asText());
-        assertEquals("Bob Active", overdueItems.get(1).get("displayName").asText());
-        assertEquals(55000L, overdueItems.get(1).get("overdueCents").asLong());
-        assertEquals(2L, overdueItems.get(1).get("overdueChargeCount").asLong());
-
-        // Verify expiring_leases:
-        // Alice: today + 10 (daysLeft = 10)
-        // Bob: today + 60 (daysLeft = 60)
-        // Charlie: today + 61 (excluded!)
-        // Archived Dave: excluded!
-        JsonNode expiringLeases = findWidget(widgets, "expiring_leases");
-        assertEquals(2L, expiringLeases.get("data").get("totalCount").asLong());
-        ArrayNode leaseItems = (ArrayNode) expiringLeases.get("data").get("items");
-        assertEquals(2, leaseItems.size());
-        assertEquals(p1.id().toString(), leaseItems.get(0).get("partyId").asText());
-        assertEquals(10, leaseItems.get(0).get("daysLeft").asInt());
-        assertEquals(p2.id().toString(), leaseItems.get(1).get("partyId").asText());
-        assertEquals(60, leaseItems.get(1).get("daysLeft").asInt());
-
-        // Verify sum_collected_period:
-        // Collected in month: payInMonth1 (15000) + payInMonth2 (25000) = 40000!
-        // (payReversed was reversed, payOutsideMonth was outside month)
-        JsonNode sumCollected = findWidget(widgets, "sum_collected");
-        assertTrue(sumCollected.get("data").get("cents").asLong() >= 40000L);
+        MvcResult dashRes = mockMvc.perform(get("/api/workspaces/" + workspace1Id + "/apps/" + appId + "/dashboard")
+                        .header("Authorization", "Bearer " + ownerToken))
+                .andExpect(status().isOk())
+                .andReturn();
+        String dashRaw = dashRes.getResponse().getContentAsString(StandardCharsets.UTF_8);
+        assertFalse(dashRaw.contains("john.secret@example.com"));
+        assertFalse(dashRaw.contains("555-123-4567"));
+        assertFalse(dashRaw.contains("storageKey"));
+        assertFalse(dashRaw.contains("storage_key"));
     }
 
     @Test
@@ -521,7 +865,7 @@ class DashboardApiTest extends AbstractIntegrationTest {
     }
 
     @Test
-    void testDashboardUnavailableWidgets() throws Exception {
+    void testUnavailableReasonCodesAllThree() throws Exception {
         UUID appId = createRentalApp(workspace1Id, "America/New_York");
         AppResponse currentApp = appService.getApp(workspace1Id, appId, ownerId);
 
@@ -693,38 +1037,47 @@ class DashboardApiTest extends AbstractIntegrationTest {
             conn.commit();
         }
 
+        jdbcClient.sql("ANALYZE ledger_entries").update();
+        jdbcClient.sql("ANALYZE parties").update();
+        jdbcClient.sql("ANALYZE document_requests").update();
+
         // Run full dashboard and measure elapsed time
         long start = System.currentTimeMillis();
         DashboardResponse response = dashboardService.getDashboard(workspace1Id, appId, ownerId, null);
         long elapsed = System.currentTimeMillis() - start;
 
         System.out.println("20000_ROWS_PERFORMANCE_REPORT: Elapsed time = " + elapsed + " ms");
-        assertTrue(elapsed < 5000, "Dashboard on 20,000 ledger entries must complete under 5 seconds, took " + elapsed + " ms");
+        assertTrue(elapsed < 1500, "Dashboard on 20,000 ledger entries must complete under 1500 ms, took " + elapsed + " ms");
         assertEquals(5, response.widgets().size());
 
         // Run EXPLAIN (ANALYZE, BUFFERS) on the three heaviest queries:
         // 1. list_overdue_parties
         String explain1 = jdbcClient.sql("""
                 EXPLAIN (ANALYZE, BUFFERS)
-                WITH overdue_charges AS (
+                WITH charge_totals AS (
+                    SELECT charge_id,
+                           SUM(amount_cents)::bigint AS outstanding,
+                           BOOL_OR(reverses_entry_id = charge_id) AS reversed
+                    FROM ledger_entries
+                    WHERE workspace_id = :wid AND app_id = :aid
+                    GROUP BY charge_id
+                ),
+                overdue_charges AS (
                     SELECT c.party_id,
                            c.id AS charge_id,
                            c.due_date,
-                           (SELECT COALESCE(SUM(e.amount_cents), 0)::bigint
-                            FROM ledger_entries e
-                            WHERE e.workspace_id = c.workspace_id AND e.app_id = c.app_id AND e.charge_id = c.id) AS outstanding
+                           ct.outstanding
                     FROM ledger_entries c
+                    JOIN charge_totals ct ON ct.charge_id = c.id
                     JOIN parties p ON p.id = c.party_id AND p.workspace_id = c.workspace_id AND p.app_id = c.app_id
                     WHERE c.workspace_id = :wid AND c.app_id = :aid
                       AND c.entry_type = 'CHARGE'
                       AND c.kind IN ('recurring', 'manual', 'late_fee')
                       AND c.due_date < :today
+                      AND ct.outstanding > 0
+                      AND NOT ct.reversed
                       AND p.archived_at IS NULL
                       AND p.party_type = 'tenant'
-                      AND NOT EXISTS (
-                          SELECT 1 FROM ledger_entries r
-                          WHERE r.workspace_id = c.workspace_id AND r.app_id = c.app_id AND r.charge_id = c.id AND r.reverses_entry_id = c.id
-                      )
                 ),
                 party_overdue AS (
                     SELECT party_id,
@@ -732,7 +1085,6 @@ class DashboardApiTest extends AbstractIntegrationTest {
                            MIN(due_date) AS oldest_due_date,
                            COUNT(*)::bigint AS overdue_charge_count
                     FROM overdue_charges
-                    WHERE outstanding > 0
                     GROUP BY party_id
                 ),
                 ranked AS (
@@ -743,7 +1095,7 @@ class DashboardApiTest extends AbstractIntegrationTest {
                            po.overdue_charge_count,
                            COUNT(*) OVER() AS total_count
                     FROM party_overdue po
-                    JOIN parties p ON p.id = po.party_id
+                    JOIN parties p ON p.id = po.party_id AND p.workspace_id = :wid AND p.app_id = :aid
                 )
                 SELECT * FROM ranked
                 ORDER BY overdue_cents DESC, party_id ASC
@@ -762,18 +1114,23 @@ class DashboardApiTest extends AbstractIntegrationTest {
         YearMonth ym = YearMonth.from(today);
         String explain2 = jdbcClient.sql("""
                 EXPLAIN (ANALYZE, BUFFERS)
+                WITH charge_totals AS (
+                    SELECT charge_id,
+                           BOOL_OR(reverses_entry_id = charge_id) AS reversed
+                    FROM ledger_entries
+                    WHERE workspace_id = :wid AND app_id = :aid
+                    GROUP BY charge_id
+                )
                 SELECT COALESCE(SUM(c.amount_cents), 0)::bigint
                 FROM ledger_entries c
+                JOIN charge_totals ct ON ct.charge_id = c.id
                 JOIN parties p ON p.id = c.party_id AND p.workspace_id = c.workspace_id AND p.app_id = c.app_id
                 WHERE c.workspace_id = :wid AND c.app_id = :aid
                   AND c.entry_type = 'CHARGE'
                   AND c.due_date >= :mStart AND c.due_date <= :mEnd
+                  AND NOT ct.reversed
                   AND p.archived_at IS NULL
                   AND p.party_type = 'tenant'
-                  AND NOT EXISTS (
-                      SELECT 1 FROM ledger_entries r
-                      WHERE r.workspace_id = c.workspace_id AND r.app_id = c.app_id AND r.charge_id = c.id AND r.reverses_entry_id = c.id
-                  )
                 """)
                 .param("wid", workspace1Id)
                 .param("aid", appId)
@@ -788,27 +1145,26 @@ class DashboardApiTest extends AbstractIntegrationTest {
         // 3. sum_overdue_charges
         String explain3 = jdbcClient.sql("""
                 EXPLAIN (ANALYZE, BUFFERS)
-                WITH overdue_charges AS (
-                    SELECT c.id,
-                           (SELECT COALESCE(SUM(e.amount_cents), 0)::bigint
-                            FROM ledger_entries e
-                            WHERE e.workspace_id = c.workspace_id AND e.app_id = c.app_id AND e.charge_id = c.id) AS outstanding
-                    FROM ledger_entries c
-                    JOIN parties p ON p.id = c.party_id AND p.workspace_id = c.workspace_id AND p.app_id = c.app_id
-                    WHERE c.workspace_id = :wid AND c.app_id = :aid
-                      AND c.entry_type = 'CHARGE'
-                      AND c.kind IN ('recurring', 'manual', 'late_fee')
-                      AND c.due_date < :today
-                      AND p.archived_at IS NULL
-                      AND p.party_type = 'tenant'
-                      AND NOT EXISTS (
-                          SELECT 1 FROM ledger_entries r
-                          WHERE r.workspace_id = c.workspace_id AND r.app_id = c.app_id AND r.charge_id = c.id AND r.reverses_entry_id = c.id
-                      )
+                WITH charge_totals AS (
+                    SELECT charge_id,
+                           SUM(amount_cents)::bigint AS outstanding,
+                           BOOL_OR(reverses_entry_id = charge_id) AS reversed
+                    FROM ledger_entries
+                    WHERE workspace_id = :wid AND app_id = :aid
+                    GROUP BY charge_id
                 )
-                SELECT COALESCE(SUM(outstanding), 0)::bigint
-                FROM overdue_charges
-                WHERE outstanding > 0
+                SELECT COALESCE(SUM(ct.outstanding), 0)::bigint
+                FROM ledger_entries c
+                JOIN charge_totals ct ON ct.charge_id = c.id
+                JOIN parties p ON p.id = c.party_id AND p.workspace_id = c.workspace_id AND p.app_id = c.app_id
+                WHERE c.workspace_id = :wid AND c.app_id = :aid
+                  AND c.entry_type = 'CHARGE'
+                  AND c.kind IN ('recurring', 'manual', 'late_fee')
+                  AND c.due_date < :today
+                  AND ct.outstanding > 0
+                  AND NOT ct.reversed
+                  AND p.archived_at IS NULL
+                  AND p.party_type = 'tenant'
                 """)
                 .param("wid", workspace1Id)
                 .param("aid", appId)

@@ -20,8 +20,9 @@ import org.springframework.test.web.servlet.MockMvc;
 import javax.sql.DataSource;
 import java.time.Instant;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
 
-import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.hasSize;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -29,6 +30,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @AutoConfigureMockMvc
 @TestPropertySource(properties = "app.dashboard.statement-timeout-ms=200")
 class DashboardTimeoutTest extends AbstractIntegrationTest {
+
+    private static final AtomicBoolean shouldSleep = new AtomicBoolean(true);
 
     @TestConfiguration
     static class SleepingStoreConfig {
@@ -38,7 +41,9 @@ class DashboardTimeoutTest extends AbstractIntegrationTest {
             return new DashboardStore(jdbcClient) {
                 @Override
                 public void beforeFirstWidgetQuery() {
-                    jdbcClient.sql("SELECT pg_sleep(1)").query().listOfRows();
+                    if (shouldSleep.compareAndSet(true, false)) {
+                        jdbcClient.sql("SELECT pg_sleep(1)").query().listOfRows();
+                    }
                 }
             };
         }
@@ -71,6 +76,7 @@ class DashboardTimeoutTest extends AbstractIntegrationTest {
 
     @BeforeEach
     void setUp() {
+        shouldSleep.set(true);
         TestDbHelper.cleanDatabase(dataSource);
 
         Instant now = Instant.now();
@@ -95,6 +101,13 @@ class DashboardTimeoutTest extends AbstractIntegrationTest {
                         .header("Authorization", "Bearer " + ownerToken))
                 .andExpect(status().isServiceUnavailable())
                 .andExpect(jsonPath("$.detail").value("dashboard_timeout"))
-                .andExpect(jsonPath("$.widgets").doesNotExist());
+                .andExpect(jsonPath("$.widgets").doesNotExist())
+                .andExpect(jsonPath("$.data").doesNotExist());
+
+        // Following normal request succeeds (the connection is not poisoned)
+        mockMvc.perform(get("/api/workspaces/" + workspaceId + "/apps/" + app.id() + "/dashboard")
+                        .header("Authorization", "Bearer " + ownerToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.widgets", hasSize(5)));
     }
 }

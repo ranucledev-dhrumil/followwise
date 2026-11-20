@@ -22,7 +22,7 @@ import java.util.*;
 @Service
 public class DashboardService {
 
-    private static final Map<String, String> WIDGET_LABELS = Map.of(
+    static final Map<String, String> WIDGET_LABELS = Map.of(
             "count_overdue_charges", "Overdue charges",
             "sum_overdue_charges", "Overdue amount",
             "sum_expected_period", "Expected (selected month)",

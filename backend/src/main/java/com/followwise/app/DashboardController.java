@@ -1,6 +1,6 @@
 package com.followwise.app;
 
-import org.springframework.http.CacheControl;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -28,7 +28,7 @@ public class DashboardController {
         UUID userId = UUID.fromString(jwt.getSubject());
         DashboardResponse response = dashboardService.getDashboard(workspaceId, appId, userId, month);
         return ResponseEntity.ok()
-                .cacheControl(CacheControl.noStore().cachePrivate())
+                .header(HttpHeaders.CACHE_CONTROL, "private, no-store")
                 .body(response);
     }
 }

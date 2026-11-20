@@ -30,29 +30,29 @@ public class DashboardStore {
 
     public long countOverdueCharges(UUID workspaceId, UUID appId, String partyType, LocalDate today) {
         StringBuilder sql = new StringBuilder("""
-                SELECT count(c.id)
+                WITH charge_totals AS (
+                    SELECT charge_id,
+                           SUM(amount_cents)::bigint AS outstanding,
+                           COALESCE(BOOL_OR(reverses_entry_id = charge_id), false) AS reversed
+                    FROM ledger_entries
+                    WHERE workspace_id = :wid AND app_id = :aid
+                    GROUP BY charge_id
+                )
+                SELECT COUNT(c.id)::bigint
                 FROM ledger_entries c
+                JOIN charge_totals ct ON ct.charge_id = c.id
                 JOIN parties p ON p.id = c.party_id AND p.workspace_id = c.workspace_id AND p.app_id = c.app_id
                 WHERE c.workspace_id = :wid AND c.app_id = :aid
                   AND c.entry_type = 'CHARGE'
                   AND c.kind IN ('recurring', 'manual', 'late_fee')
                   AND c.due_date < :today
+                  AND ct.outstanding > 0
+                  AND NOT ct.reversed
                   AND p.archived_at IS NULL
                 """);
         if (partyType != null) {
             sql.append(" AND p.party_type = :partyType");
         }
-        sql.append("""
-                  AND NOT EXISTS (
-                      SELECT 1 FROM ledger_entries r
-                      WHERE r.workspace_id = c.workspace_id AND r.app_id = c.app_id AND r.charge_id = c.id AND r.reverses_entry_id = c.id
-                  )
-                  AND (
-                      SELECT COALESCE(SUM(e.amount_cents), 0)::bigint
-                      FROM ledger_entries e
-                      WHERE e.workspace_id = c.workspace_id AND e.app_id = c.app_id AND e.charge_id = c.id
-                  ) > 0
-                """);
 
         var spec = jdbcClient.sql(sql.toString())
                 .param("wid", workspaceId)
@@ -66,32 +66,29 @@ public class DashboardStore {
 
     public long sumOverdueCharges(UUID workspaceId, UUID appId, String partyType, LocalDate today) {
         StringBuilder sql = new StringBuilder("""
-                WITH overdue_charges AS (
-                    SELECT c.id,
-                           (SELECT COALESCE(SUM(e.amount_cents), 0)::bigint
-                            FROM ledger_entries e
-                            WHERE e.workspace_id = c.workspace_id AND e.app_id = c.app_id AND e.charge_id = c.id) AS outstanding
-                    FROM ledger_entries c
-                    JOIN parties p ON p.id = c.party_id AND p.workspace_id = c.workspace_id AND p.app_id = c.app_id
-                    WHERE c.workspace_id = :wid AND c.app_id = :aid
-                      AND c.entry_type = 'CHARGE'
-                      AND c.kind IN ('recurring', 'manual', 'late_fee')
-                      AND c.due_date < :today
-                      AND p.archived_at IS NULL
+                WITH charge_totals AS (
+                    SELECT charge_id,
+                           SUM(amount_cents)::bigint AS outstanding,
+                           COALESCE(BOOL_OR(reverses_entry_id = charge_id), false) AS reversed
+                    FROM ledger_entries
+                    WHERE workspace_id = :wid AND app_id = :aid
+                    GROUP BY charge_id
+                )
+                SELECT COALESCE(SUM(ct.outstanding), 0)::bigint
+                FROM ledger_entries c
+                JOIN charge_totals ct ON ct.charge_id = c.id
+                JOIN parties p ON p.id = c.party_id AND p.workspace_id = c.workspace_id AND p.app_id = c.app_id
+                WHERE c.workspace_id = :wid AND c.app_id = :aid
+                  AND c.entry_type = 'CHARGE'
+                  AND c.kind IN ('recurring', 'manual', 'late_fee')
+                  AND c.due_date < :today
+                  AND ct.outstanding > 0
+                  AND NOT ct.reversed
+                  AND p.archived_at IS NULL
                 """);
         if (partyType != null) {
             sql.append(" AND p.party_type = :partyType");
         }
-        sql.append("""
-                      AND NOT EXISTS (
-                          SELECT 1 FROM ledger_entries r
-                          WHERE r.workspace_id = c.workspace_id AND r.app_id = c.app_id AND r.charge_id = c.id AND r.reverses_entry_id = c.id
-                      )
-                )
-                SELECT COALESCE(SUM(outstanding), 0)::bigint
-                FROM overdue_charges
-                WHERE outstanding > 0
-                """);
 
         var spec = jdbcClient.sql(sql.toString())
                 .param("wid", workspaceId)
@@ -105,23 +102,26 @@ public class DashboardStore {
 
     public long sumExpectedPeriod(UUID workspaceId, UUID appId, String partyType, LocalDate monthStart, LocalDate monthEnd) {
         StringBuilder sql = new StringBuilder("""
+                WITH charge_totals AS (
+                    SELECT charge_id,
+                           COALESCE(BOOL_OR(reverses_entry_id = charge_id), false) AS reversed
+                    FROM ledger_entries
+                    WHERE workspace_id = :wid AND app_id = :aid
+                    GROUP BY charge_id
+                )
                 SELECT COALESCE(SUM(c.amount_cents), 0)::bigint
                 FROM ledger_entries c
+                JOIN charge_totals ct ON ct.charge_id = c.id
                 JOIN parties p ON p.id = c.party_id AND p.workspace_id = c.workspace_id AND p.app_id = c.app_id
                 WHERE c.workspace_id = :wid AND c.app_id = :aid
                   AND c.entry_type = 'CHARGE'
                   AND c.due_date >= :monthStart AND c.due_date <= :monthEnd
+                  AND NOT ct.reversed
                   AND p.archived_at IS NULL
                 """);
         if (partyType != null) {
             sql.append(" AND p.party_type = :partyType");
         }
-        sql.append("""
-                  AND NOT EXISTS (
-                      SELECT 1 FROM ledger_entries r
-                      WHERE r.workspace_id = c.workspace_id AND r.app_id = c.app_id AND r.charge_id = c.id AND r.reverses_entry_id = c.id
-                  )
-                """);
 
         var spec = jdbcClient.sql(sql.toString())
                 .param("wid", workspaceId)
@@ -136,23 +136,26 @@ public class DashboardStore {
 
     public long sumCollectedPeriod(UUID workspaceId, UUID appId, String partyType, LocalDate monthStart, LocalDate monthEnd) {
         StringBuilder sql = new StringBuilder("""
+                WITH payment_reversals AS (
+                    SELECT reverses_entry_id
+                    FROM ledger_entries
+                    WHERE workspace_id = :wid AND app_id = :aid
+                      AND entry_type = 'REVERSAL'
+                      AND reverses_entry_id IS NOT NULL
+                )
                 SELECT COALESCE(SUM(-py.amount_cents), 0)::bigint
                 FROM ledger_entries py
                 JOIN parties p ON p.id = py.party_id AND p.workspace_id = py.workspace_id AND p.app_id = py.app_id
+                LEFT JOIN payment_reversals pr ON pr.reverses_entry_id = py.id
                 WHERE py.workspace_id = :wid AND py.app_id = :aid
                   AND py.entry_type = 'PAYMENT'
                   AND py.paid_on >= :monthStart AND py.paid_on <= :monthEnd
                   AND p.archived_at IS NULL
+                  AND pr.reverses_entry_id IS NULL
                 """);
         if (partyType != null) {
             sql.append(" AND p.party_type = :partyType");
         }
-        sql.append("""
-                  AND NOT EXISTS (
-                      SELECT 1 FROM ledger_entries r
-                      WHERE r.workspace_id = py.workspace_id AND r.app_id = py.app_id AND r.charge_id = py.charge_id AND r.reverses_entry_id = py.id
-                  )
-                """);
 
         var spec = jdbcClient.sql(sql.toString())
                 .param("wid", workspaceId)
@@ -168,29 +171,34 @@ public class DashboardStore {
     public DashboardResponse.ListData<DashboardResponse.OverduePartyItem> listOverdueParties(
             UUID workspaceId, UUID appId, String partyType, LocalDate today) {
         StringBuilder sql = new StringBuilder("""
-                WITH overdue_charges AS (
+                WITH charge_totals AS (
+                    SELECT charge_id,
+                           SUM(amount_cents)::bigint AS outstanding,
+                           COALESCE(BOOL_OR(reverses_entry_id = charge_id), false) AS reversed
+                    FROM ledger_entries
+                    WHERE workspace_id = :wid AND app_id = :aid
+                    GROUP BY charge_id
+                ),
+                overdue_charges AS (
                     SELECT c.party_id,
                            c.id AS charge_id,
                            c.due_date,
-                           (SELECT COALESCE(SUM(e.amount_cents), 0)::bigint
-                            FROM ledger_entries e
-                            WHERE e.workspace_id = c.workspace_id AND e.app_id = c.app_id AND e.charge_id = c.id) AS outstanding
+                           ct.outstanding
                     FROM ledger_entries c
+                    JOIN charge_totals ct ON ct.charge_id = c.id
                     JOIN parties p ON p.id = c.party_id AND p.workspace_id = c.workspace_id AND p.app_id = c.app_id
                     WHERE c.workspace_id = :wid AND c.app_id = :aid
                       AND c.entry_type = 'CHARGE'
                       AND c.kind IN ('recurring', 'manual', 'late_fee')
                       AND c.due_date < :today
+                      AND ct.outstanding > 0
+                      AND NOT ct.reversed
                       AND p.archived_at IS NULL
                 """);
         if (partyType != null) {
             sql.append(" AND p.party_type = :partyType");
         }
         sql.append("""
-                      AND NOT EXISTS (
-                          SELECT 1 FROM ledger_entries r
-                          WHERE r.workspace_id = c.workspace_id AND r.app_id = c.app_id AND r.charge_id = c.id AND r.reverses_entry_id = c.id
-                      )
                 ),
                 party_overdue AS (
                     SELECT party_id,
@@ -198,7 +206,6 @@ public class DashboardStore {
                            MIN(due_date) AS oldest_due_date,
                            COUNT(*)::bigint AS overdue_charge_count
                     FROM overdue_charges
-                    WHERE outstanding > 0
                     GROUP BY party_id
                 ),
                 ranked AS (
@@ -209,7 +216,7 @@ public class DashboardStore {
                            po.overdue_charge_count,
                            COUNT(*) OVER() AS total_count
                     FROM party_overdue po
-                    JOIN parties p ON p.id = po.party_id
+                    JOIN parties p ON p.id = po.party_id AND p.workspace_id = :wid AND p.app_id = :aid
                 )
                 SELECT * FROM ranked
                 ORDER BY overdue_cents DESC, party_id ASC
@@ -244,12 +251,14 @@ public class DashboardStore {
     public DashboardResponse.ListData<DashboardResponse.ExpiringLeaseItem> listExpiringLeases(
             UUID workspaceId, UUID appId, String partyType, String dateField, LocalDate today, LocalDate todayPlus60) {
         StringBuilder sql = new StringBuilder("""
-                WITH filtered AS (
+                WITH valid_dates AS (
                     SELECT p.id AS party_id,
                            p.display_name,
-                           (p.data ->> :dateField)::date AS date_val,
-                           ((p.data ->> :dateField)::date - :today)::int AS days_left,
-                           COUNT(*) OVER() AS total_count
+                           CASE WHEN jsonb_exists(p.data, :dateField)
+                                     AND (p.data ->> :dateField) ~ '^\\d{4}-\\d{2}-\\d{2}$'
+                                     AND pg_input_is_valid(p.data ->> :dateField, 'date')
+                                THEN (p.data ->> :dateField)::date
+                                ELSE NULL END AS date_val
                     FROM parties p
                     WHERE p.workspace_id = :wid AND p.app_id = :aid
                       AND p.archived_at IS NULL
@@ -258,9 +267,16 @@ public class DashboardStore {
             sql.append(" AND p.party_type = :partyType");
         }
         sql.append("""
-                      AND jsonb_exists(p.data, :dateField)
-                      AND (p.data ->> :dateField) ~ '^\\d{4}-\\d{2}-\\d{2}$'
-                      AND (p.data ->> :dateField)::date BETWEEN :today AND :todayPlus60
+                ),
+                filtered AS (
+                    SELECT party_id,
+                           display_name,
+                           date_val,
+                           (date_val - :today)::int AS days_left,
+                           COUNT(*) OVER() AS total_count
+                    FROM valid_dates
+                    WHERE date_val IS NOT NULL
+                      AND date_val BETWEEN :today AND :todayPlus60
                 )
                 SELECT party_id,
                        display_name,
@@ -326,7 +342,7 @@ public class DashboardStore {
                            ms.oldest_due_date,
                            COUNT(*) OVER() AS total_count
                     FROM missing_summary ms
-                    JOIN parties p ON p.id = ms.party_id
+                    JOIN parties p ON p.id = ms.party_id AND p.workspace_id = :wid AND p.app_id = :aid
                 )
                 SELECT * FROM ranked
                 ORDER BY oldest_due_date ASC NULLS LAST, party_id ASC

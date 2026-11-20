@@ -1,6 +1,6 @@
 package com.followwise.app;
 
-import org.springframework.http.CacheControl;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -30,7 +30,7 @@ public class FormsController {
         UUID userId = UUID.fromString(jwt.getSubject());
         FormsResponse response = formsService.getForms(workspaceId, appId, userId);
         return ResponseEntity.ok()
-                .cacheControl(CacheControl.noStore().cachePrivate())
+                .header(HttpHeaders.CACHE_CONTROL, "private, no-store")
                 .body(response);
     }
 }
