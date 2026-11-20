@@ -1,0 +1,199 @@
+{
+  "definitionVersion": 1,
+  "appName": "Rental Property Manager",
+  "timezone": "America/New_York",
+  "currency": "USD",
+  "partyTypes": [
+    {
+      "id": "tenant",
+      "label": "Tenant",
+      "displayNameField": "name",
+      "listColumns": ["name", "email", "phone", "monthly_rent"],
+      "fields": [
+        {
+          "id": "name",
+          "label": "Full Name",
+          "type": "text",
+          "required": true,
+          "hidden": false,
+          "readOnly": false,
+          "options": null,
+          "target": null,
+          "constraints": {
+            "minLength": 1,
+            "maxLength": 500
+          }
+        },
+        {
+          "id": "email",
+          "label": "Email Address",
+          "type": "email",
+          "required": true,
+          "hidden": false,
+          "readOnly": false,
+          "options": null,
+          "target": null,
+          "constraints": {
+            "maxLength": 254
+          }
+        },
+        {
+          "id": "phone",
+          "label": "Phone Number",
+          "type": "phone",
+          "required": false,
+          "hidden": false,
+          "readOnly": false,
+          "options": null,
+          "target": null,
+          "constraints": {
+            "minLength": 5,
+            "maxLength": 32
+          }
+        },
+        {
+          "id": "monthly_rent",
+          "label": "Monthly Rent",
+          "type": "money",
+          "required": true,
+          "hidden": false,
+          "readOnly": false,
+          "options": null,
+          "target": null,
+          "constraints": {
+            "min": 0,
+            "max": 100000000000
+          }
+        },
+        {
+          "id": "due_day",
+          "label": "Rent Due Day",
+          "type": "integer",
+          "required": true,
+          "hidden": false,
+          "readOnly": false,
+          "options": null,
+          "target": null,
+          "constraints": {
+            "min": -1000000000,
+            "max": 1000000000
+          }
+        },
+        {
+          "id": "lease_start",
+          "label": "Lease Start Date",
+          "type": "date",
+          "required": true,
+          "hidden": false,
+          "readOnly": false,
+          "options": null,
+          "target": null,
+          "constraints": {
+            "format": "yyyy-MM-dd"
+          }
+        },
+        {
+          "id": "lease_end",
+          "label": "Lease End Date",
+          "type": "date",
+          "required": true,
+          "hidden": false,
+          "readOnly": false,
+          "options": null,
+          "target": null,
+          "constraints": {
+            "format": "yyyy-MM-dd"
+          }
+        },
+        {
+          "id": "unit",
+          "label": "Unit",
+          "type": "record_ref",
+          "required": false,
+          "hidden": false,
+          "readOnly": false,
+          "options": null,
+          "target": "unit",
+          "constraints": null
+        }
+      ]
+    }
+  ],
+  "recordTypes": [
+    {
+      "id": "unit",
+      "label": "Unit",
+      "displayNameField": "address",
+      "listColumns": ["address", "default_rent", "status"],
+      "fields": [
+        {
+          "id": "address",
+          "label": "Address",
+          "type": "text",
+          "required": true,
+          "hidden": false,
+          "readOnly": false,
+          "options": null,
+          "target": null,
+          "constraints": {
+            "minLength": 1,
+            "maxLength": 500
+          }
+        },
+        {
+          "id": "default_rent",
+          "label": "Default Rent",
+          "type": "money",
+          "required": false,
+          "hidden": false,
+          "readOnly": false,
+          "options": null,
+          "target": null,
+          "constraints": {
+            "min": 0,
+            "max": 100000000000
+          }
+        },
+        {
+          "id": "status",
+          "label": "Status",
+          "type": "select",
+          "required": true,
+          "hidden": false,
+          "readOnly": false,
+          "options": [
+            {
+              "id": "occupied",
+              "label": "Occupied",
+              "archived": false
+            },
+            {
+              "id": "vacant",
+              "label": "Vacant",
+              "archived": false
+            }
+          ],
+          "target": null,
+          "constraints": null
+        }
+      ]
+    }
+  ],
+  "checklists": [],
+  "chargeSchedules": [
+    {
+      "id": "monthly_rent",
+      "label": "Monthly Rent",
+      "kind": "recurring",
+      "partyType": "tenant",
+      "enabled": true
+    },
+    {
+      "id": "late_fee",
+      "label": "Late Fee",
+      "kind": "late_fee",
+      "partyType": "tenant",
+      "enabled": false
+    }
+  ]
+}

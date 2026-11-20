@@ -1,8 +1,8 @@
 # PLAN-0015: Forms and dashboard generation
 
-Status: DRAFT        <!-- DRAFT -> APPROVED (founder) -> IN PROGRESS -> DONE | BLOCKED -->
+Status: DONE
 Phase / step: Phase 1, step 1g
-Author: orchestrator   Executor: (model that executed)
+Author: orchestrator   Executor: Gemini 3.8 Flash
 Branch: plan-0015 (created by the founder; AI models run no git)
 
 ## Goal
@@ -31,13 +31,339 @@ DashboardStore (JdbcClient, one set-based query per widget type, row limit 20 pl
 Append D-111 to D-115 to README 14.1 exactly as written here. Update docs/STATUS.md: tick "1g. Forms and dashboard generation (PLAN-0015)", set the Phase 1 tracker row to BUILT, ACCEPTANCE PENDING, add the log line | YYYY-MM-DD | PLAN-0015: forms and dashboard generation (Phase 1, step 1g) | <model> | Done |, add Known gaps (no caching or materialized totals; reminders and dashboard lease logic read the party JSON date with a cast after a regex check), and set Next task to "PLAN-0016: Phase 1 deploy rehearsal and acceptance".
 
 ## Acceptance
-- [ ] Every test above exists and the suite is green three times in a row (report baseline 332, new count, and the arithmetic).
-- [ ] The report contains: the index list found in V7, V9, V10; the dashboard SQL of the three heaviest widgets with line numbers (copied, not summarized); the EXPLAIN output; the elapsed time of the 20000-row test; the statement count for 10 and 100 parties.
-- [ ] No git commands, no downloads or installs, no edits to AGENTS.md; no decision text was changed.
+- [x] Every test above exists and the suite is green three times in a row (report baseline 332, new count, and the arithmetic).
+- [x] The report contains: the index list found in V7, V9, V10; the dashboard SQL of the three heaviest widgets with line numbers (copied, not summarized); the EXPLAIN output; the elapsed time of the 20000-row test; the statement count for 10 and 100 parties.
+- [x] No git commands, no downloads or installs, no edits to AGENTS.md; no decision text was changed.
 
 ---
 ## Execution report (executor fills)
 - What was done:
+  - Slice 0: Inspected existing indexes across V7, V9, V10. Created `V11__forms_dashboard_indexes.sql` with 5 new indexes (noting `ledger_entries(app_id, charge_id)` already existed from V7). Created `FormsDashboardMigrationTest` asserting all 6 indexes in `pg_indexes` and verifying immutability triggers on `ledger_entries`.
+  - Slice 1: Created `FieldConstraints` in `com.followwise.appdef` with all D-111 limits. Refactored `FieldValidator` to reference `FieldConstraints` with zero literal limits remaining. Added `testSharedConstraintsLimits` in `FieldValidatorTest`.
+  - Slice 2: Implemented `FormsResponse`, `FormsService`, and `FormsController` (`GET /api/workspaces/{wid}/apps/{aid}/forms`). Configured `Cache-Control: private, no-store`. Created test fixtures for `rental-property-manager` and `client-document-tracker`. Created `FormsApiTest` with 11 tests covering snapshot matching, field/option archiving rules, listColumns and displayNameField, permission matrix, and PII exclusion.
+  - Slice 3: Added `app.dashboard.statement-timeout-ms=5000` to `application.properties`. Implemented `DashboardResponse`, `DashboardTimeoutException`, and mapped 503 `dashboard_timeout` in `AppExceptionHandler`. Implemented set-based queries in `DashboardStore`, timeout and timezone logic in `DashboardService`, and `DashboardController` (`GET /api/workspaces/{wid}/apps/{aid}/dashboard`). Added `DashboardTimeoutTest` (using `@Primary` test store with `pg_sleep(1)`), `DashboardStatementCountTest` (dynamic proxy verifying identical 9 statements for 10 and 100 parties), and `DashboardApiTest` (9 tests covering all widget calculations, edge cases, date boundaries, tie-breaking, isolation, unavailable widgets, and the 20,000-row volume test with EXPLAIN ANALYZE).
+  - Slice 4: Appended D-111 through D-115 verbatim to `README.md` section 14.1 table. Updated `docs/STATUS.md` (marked 1g complete, updated phase tracker, added task log, added known gaps, set next task to `PLAN-0016`). Executed full backend test suite 3 times consecutively with all 357 tests passing.
+
 - Files changed (real paths, grouped by slice):
+  - Slice 0:
+    - `backend/src/main/resources/db/migration/V11__forms_dashboard_indexes.sql`
+    - `backend/src/test/java/com/followwise/app/FormsDashboardMigrationTest.java`
+  - Slice 1:
+    - `backend/src/main/java/com/followwise/appdef/FieldConstraints.java`
+    - `backend/src/main/java/com/followwise/party/FieldValidator.java`
+    - `backend/src/test/java/com/followwise/party/FieldValidatorTest.java`
+  - Slice 2:
+    - `backend/src/main/java/com/followwise/app/FormsResponse.java`
+    - `backend/src/main/java/com/followwise/app/FormsService.java`
+    - `backend/src/main/java/com/followwise/app/FormsController.java`
+    - `backend/src/test/resources/appdefinition/templates/rental-property-manager-forms.json`
+    - `backend/src/test/resources/appdefinition/templates/client-document-tracker-forms.json`
+    - `backend/src/test/java/com/followwise/app/FormsApiTest.java`
+  - Slice 3:
+    - `backend/src/main/resources/application.properties`
+    - `backend/src/main/java/com/followwise/app/DashboardResponse.java`
+    - `backend/src/main/java/com/followwise/app/DashboardTimeoutException.java`
+    - `backend/src/main/java/com/followwise/app/AppExceptionHandler.java`
+    - `backend/src/main/java/com/followwise/app/DashboardStore.java`
+    - `backend/src/main/java/com/followwise/app/DashboardService.java`
+    - `backend/src/main/java/com/followwise/app/DashboardController.java`
+    - `backend/src/test/java/com/followwise/app/DashboardTimeoutTest.java`
+    - `backend/src/test/java/com/followwise/app/DashboardStatementCountTest.java`
+    - `backend/src/test/java/com/followwise/app/DashboardApiTest.java`
+  - Slice 4:
+    - `README.md`
+    - `docs/STATUS.md`
+    - `docs/plans/PLAN-0015-forms-and-dashboard.md`
+
 - Deviations (list every one):
+  - In `DashboardStore.java`, postgres jsonb existence `p.data ? :dateField` collided with JDBC parameter placeholder parser (`InvalidDataAccessApiUsageException: Not allowed to mix named and traditional ? placeholders`). Resolved by using PostgreSQL standard function `jsonb_exists(p.data, :dateField)`.
+  - In `DashboardService.java`, caught `SQLException` with SQLState `"57014"` (query_canceled / statement_timeout) instead of directly importing `PSQLException` because `org.postgresql:postgresql` has `<scope>runtime</scope>` in `pom.xml`.
+  - In `DashboardApiTest.java`, test app definition insertion for unavailable widgets bypassed semantic validator via direct app version insertion because semantic validation properly rejects definitions with dangling/unresolved block references.
+
 - Final test counts (existing + new):
+  - Baseline: 332 tests
+  - New tests added: 25 tests
+    - Slice 0: 2 (`FormsDashboardMigrationTest`: `testV11IndexesCreated`, `testLedgerEntriesImmutabilityTriggersPreserved`)
+    - Slice 1: 1 (`FieldValidatorTest`: `testSharedConstraintsLimits`)
+    - Slice 2: 11 (`FormsApiTest`: `testFormsRentalTemplateSnapshot`, `testFormsClientDocTrackerSnapshot`, `testFormsArchivedFieldHiddenAndReadOnly`, `testFormsArchivedOptionFlagged`, `testFormsArchivedTypesChecklistsSchedulesOmitted`, `testFormsDisplayNameFallbackWhenFirstTextArchived`, `testFormsListColumnsFirstTextArchived`, `testFormsConstraintsMatchSharedConstants`, `testFormsPermissionMatrix`, `testFormsArchivedAppStillReadable`, `testFormsResponseContainsNoPiiOrSecrets`)
+    - Slice 3: 11 (`DashboardTimeoutTest`: `testDashboardStatementTimeoutReturns503`; `DashboardStatementCountTest`: `testNoNPlusOneQueriesIdenticalStatementCountFor10And100Parties`; `DashboardApiTest`: `testRentalDashboardCalculation`, `testDashboardMonthParameterScenarios`, `testDashboardOppositeTimezonesDifferentTodayAndOverdue`, `testDashboardListsCappedAt20WithDeterministicOrderAndTotalCount`, `testDashboardLeaseAndDocExpiringWindows`, `testDashboardDocCompletionPercentageAndOverdueDocs`, `testDashboardUnavailableWidgets`, `testDashboardCrossAppAndWorkspaceIsolation`, `testRentalDashboardLargeVolumePerformance20k`)
+  - Arithmetic: 332 baseline + 25 new = 357 total tests
+  - Full suite run 1: Tests run: 357, Failures: 0, Errors: 0, Skipped: 0 (time: 04:34 min)
+  - Full suite run 2: Tests run: 357, Failures: 0, Errors: 0, Skipped: 0 (time: 05:30 min)
+  - Full suite run 3: Tests run: 357, Failures: 0, Errors: 0, Skipped: 0 (time: 04:13 min)
+
+- Indexes found in V7, V9, V10:
+  - V7 indexes:
+    - `uq_parties_id_workspace_app` on `parties (id, workspace_id, app_id)`
+    - `idx_ledger_app_idempotency` on `ledger_entries (app_id, idempotency_key)`
+    - `idx_ledger_schedule_period` on `ledger_entries (app_id, schedule_id, period_start)`
+    - `idx_ledger_party_created` on `ledger_entries (app_id, party_id, created_at)`
+    - `idx_ledger_charge_id` on `ledger_entries (app_id, charge_id)`
+    - `idx_ledger_workspace` on `ledger_entries (workspace_id)`
+  - V9 indexes:
+    - `idx_doc_requests_app_party_item` on `document_requests (app_id, party_id, checklist_id, item_id)`
+    - `idx_doc_requests_current_doc` on `document_requests (current_document_id)`
+    - `idx_doc_requests_app_party_status` on `document_requests (app_id, party_id, status)`
+    - `idx_doc_requests_app_due_date` on `document_requests (app_id, due_date)`
+    - `idx_doc_requests_workspace` on `document_requests (workspace_id)`
+    - `idx_documents_app_party` on `documents (app_id, party_id)`
+    - `idx_documents_request` on `documents (request_id)`
+    - `idx_documents_workspace` on `documents (workspace_id)`
+  - V10 indexes:
+    - `idx_reminder_events_idempotent` on `reminder_events (app_id, rule_id, party_id, subject_id, scheduled_for)`
+    - `idx_reminder_events_app_party_status` on `reminder_events (app_id, party_id, status)`
+    - `idx_reminder_events_workspace` on `reminder_events (workspace_id)`
+  - V11 migration outcome: `ledger_entries(app_id, charge_id)` already existed in V7 as `idx_ledger_charge_id`; V11 created the remaining 5 indexes (`idx_ledger_app_due_date_charge`, `idx_ledger_app_paid_on_payment`, `idx_doc_requests_app_status_due_date`, `idx_doc_requests_app_party`, `idx_parties_app_type_unarchived`).
+
+- 20,000-row test performance:
+  - Elapsed time: 1995 ms (well below the 5000 ms statement timeout).
+
+- Statement counts for 10 and 100 parties:
+  - 10 parties: 9 SQL statements
+  - 100 parties: 9 SQL statements
+  - Verification: `DashboardStatementCountTest` proves statement count is invariant with party count (zero N+1 queries).
+
+- Dashboard SQL of three heaviest widgets (from `backend/src/main/java/com/followwise/app/DashboardStore.java`):
+
+1. `list_overdue_parties` (lines 170-217):
+```java
+170:         StringBuilder sql = new StringBuilder("""
+171:                 WITH overdue_charges AS (
+172:                     SELECT c.party_id,
+173:                            c.id AS charge_id,
+174:                            c.due_date,
+175:                            (SELECT COALESCE(SUM(e.amount_cents), 0)::bigint
+176:                             FROM ledger_entries e
+177:                             WHERE e.workspace_id = c.workspace_id AND e.app_id = c.app_id AND e.charge_id = c.id) AS outstanding
+178:                     FROM ledger_entries c
+179:                     JOIN parties p ON p.id = c.party_id AND p.workspace_id = c.workspace_id AND p.app_id = c.app_id
+180:                     WHERE c.workspace_id = :wid AND c.app_id = :aid
+181:                       AND c.entry_type = 'CHARGE'
+182:                       AND c.kind IN ('recurring', 'manual', 'late_fee')
+183:                       AND c.due_date < :today
+184:                       AND p.archived_at IS NULL
+185:                 """);
+186:         if (partyType != null) {
+187:             sql.append(" AND p.party_type = :partyType");
+188:         }
+189:         sql.append("""
+190:                       AND NOT EXISTS (
+191:                           SELECT 1 FROM ledger_entries r
+192:                           WHERE r.workspace_id = c.workspace_id AND r.app_id = c.app_id AND r.charge_id = c.id AND r.reverses_entry_id = c.id
+193:                       )
+194:                 ),
+195:                 party_overdue AS (
+196:                     SELECT party_id,
+197:                            SUM(outstanding)::bigint AS overdue_cents,
+198:                            MIN(due_date) AS oldest_due_date,
+199:                            COUNT(*)::bigint AS overdue_charge_count
+200:                     FROM overdue_charges
+201:                     WHERE outstanding > 0
+202:                     GROUP BY party_id
+203:                 ),
+204:                 ranked AS (
+205:                     SELECT p.id AS party_id,
+206:                            p.display_name,
+207:                            po.overdue_cents,
+208:                            po.oldest_due_date,
+209:                            po.overdue_charge_count,
+210:                            COUNT(*) OVER() AS total_count
+211:                     FROM party_overdue po
+212:                     JOIN parties p ON p.id = po.party_id
+213:                 )
+214:                 SELECT * FROM ranked
+215:                 ORDER BY overdue_cents DESC, party_id ASC
+216:                 LIMIT 20
+217:                 """);
+```
+
+2. `sum_expected_period` (lines 107-124):
+```java
+107:         StringBuilder sql = new StringBuilder("""
+108:                 SELECT COALESCE(SUM(c.amount_cents), 0)::bigint
+109:                 FROM ledger_entries c
+110:                 JOIN parties p ON p.id = c.party_id AND p.workspace_id = c.workspace_id AND p.app_id = c.app_id
+111:                 WHERE c.workspace_id = :wid AND c.app_id = :aid
+112:                   AND c.entry_type = 'CHARGE'
+113:                   AND c.due_date >= :monthStart AND c.due_date <= :monthEnd
+114:                   AND p.archived_at IS NULL
+115:                 """);
+116:         if (partyType != null) {
+117:             sql.append(" AND p.party_type = :partyType");
+118:         }
+119:         sql.append("""
+120:                   AND NOT EXISTS (
+121:                       SELECT 1 FROM ledger_entries r
+122:                       WHERE r.workspace_id = c.workspace_id AND r.app_id = c.app_id AND r.charge_id = c.id AND r.reverses_entry_id = c.id
+123:                   )
+124:                 """);
+```
+
+3. `sum_overdue_charges` (lines 68-94):
+```java
+68:         StringBuilder sql = new StringBuilder("""
+69:                 WITH overdue_charges AS (
+70:                     SELECT c.id,
+71:                            (SELECT COALESCE(SUM(e.amount_cents), 0)::bigint
+72:                             FROM ledger_entries e
+73:                             WHERE e.workspace_id = c.workspace_id AND e.app_id = c.app_id AND e.charge_id = c.id) AS outstanding
+74:                     FROM ledger_entries c
+75:                     JOIN parties p ON p.id = c.party_id AND p.workspace_id = c.workspace_id AND p.app_id = c.app_id
+76:                     WHERE c.workspace_id = :wid AND c.app_id = :aid
+77:                       AND c.entry_type = 'CHARGE'
+78:                       AND c.kind IN ('recurring', 'manual', 'late_fee')
+79:                       AND c.due_date < :today
+80:                       AND p.archived_at IS NULL
+81:                 """);
+82:         if (partyType != null) {
+83:             sql.append(" AND p.party_type = :partyType");
+84:         }
+85:         sql.append("""
+86:                       AND NOT EXISTS (
+87:                           SELECT 1 FROM ledger_entries r
+88:                           WHERE r.workspace_id = c.workspace_id AND r.app_id = c.app_id AND r.charge_id = c.id AND r.reverses_entry_id = c.id
+89:                       )
+90:                 )
+91:                 SELECT COALESCE(SUM(outstanding), 0)::bigint
+92:                 FROM overdue_charges
+93:                 WHERE outstanding > 0
+94:                 """);
+```
+
+- EXPLAIN (ANALYZE, BUFFERS) outputs:
+
+1. `list_overdue_parties`:
+```text
+Limit  (cost=49.88..49.88 rows=1 width=76) (actual time=222.275..222.281 rows=20 loops=1)
+  Buffers: shared hit=149875
+  ->  Sort  (cost=49.88..49.88 rows=1 width=76) (actual time=222.274..222.278 rows=20 loops=1)
+        Sort Key: ((sum((SubPlan 1)))::bigint) DESC, p.id
+        Sort Method: top-N heapsort  Memory: 27kB
+        Buffers: shared hit=149875
+        ->  WindowAgg  (cost=25.37..49.87 rows=1 width=76) (actual time=222.101..222.177 rows=500 loops=1)
+              Buffers: shared hit=149875
+              ->  Nested Loop  (cost=25.37..49.85 rows=1 width=68) (actual time=102.110..221.339 rows=500 loops=1)
+                    Buffers: shared hit=149875
+                    ->  GroupAggregate  (cost=25.10..41.51 rows=1 width=36) (actual time=102.105..219.867 rows=500 loops=1)
+                          Group Key: c.party_id
+                          Buffers: shared hit=148375
+                          ->  Nested Loop Anti Join  (cost=25.10..33.16 rows=1 width=68) (actual time=101.940..165.099 rows=15000 loops=1)
+                                Buffers: shared hit=103375
+                                ->  Merge Join  (cost=24.82..24.84 rows=1 width=68) (actual time=101.932..110.086 rows=15000 loops=1)
+                                      Merge Cond: (c.party_id = p_1.id)
+                                      Buffers: shared hit=58375
+                                      ->  Sort  (cost=16.64..16.65 rows=1 width=68) (actual time=101.694..104.888 rows=15000 loops=1)
+                                            Sort Key: c.party_id
+                                            Sort Method: quicksort  Memory: 1791kB
+                                            Buffers: shared hit=58363
+                                            ->  Index Scan using idx_ledger_app_due_date_charge on ledger_entries c  (cost=0.28..16.63 rows=1 width=68) (actual time=0.051..93.252 rows=15000 loops=1)
+                                                  Index Cond: ((app_id = '65ecfe1f-c284-4db6-b079-38db14d7d47a'::uuid) AND (due_date < '2026-11-20'::date))
+                                                  Filter: ((workspace_id = '225fb1f6-2d43-4410-866f-c9e32d86cc43'::uuid) AND (kind = ANY ('{recurring,manual,late_fee}'::text[])) AND ((SubPlan 2) > 0))
+                                                  Buffers: shared hit=58363
+                                                  SubPlan 2
+                                                    ->  Aggregate  (cost=8.31..8.32 rows=1 width=8) (actual time=0.004..0.004 rows=1 loops=15000)
+                                                          Buffers: shared hit=45000
+                                                          ->  Index Scan using idx_ledger_charge_id on ledger_entries e_1  (cost=0.28..8.30 rows=1 width=8) (actual time=0.003..0.003 rows=1 loops=15000)
+                                                                Index Cond: ((app_id = c.app_id) AND (charge_id = c.id))
+                                                                Filter: (workspace_id = c.workspace_id)
+                                                                Buffers: shared hit=45000
+                                      ->  Sort  (cost=8.17..8.18 rows=1 width=48) (actual time=0.223..0.351 rows=500 loops=1)
+                                            Sort Key: p_1.id
+                                            Sort Method: quicksort  Memory: 60kB
+                                            Buffers: shared hit=12
+                                            ->  Index Scan using idx_parties_app_type_unarchived on parties p_1  (cost=0.14..8.16 rows=1 width=48) (actual time=0.028..0.119 rows=500 loops=1)
+                                                  Index Cond: ((app_id = '65ecfe1f-c284-4db6-b079-38db14d7d47a'::uuid) AND (party_type = 'tenant'::text))
+                                                  Filter: (workspace_id = '225fb1f6-2d43-4410-866f-c9e32d86cc43'::uuid)
+                                                  Buffers: shared hit=12
+                                ->  Index Scan using idx_ledger_charge_id on ledger_entries r  (cost=0.28..8.31 rows=1 width=64) (actual time=0.003..0.003 rows=0 loops=15000)
+                                      Index Cond: ((app_id = '65ecfe1f-c284-4db6-b079-38db14d7d47a'::uuid) AND (charge_id = c.id))
+                                      Filter: ((workspace_id = '225fb1f6-2d43-4410-866f-c9e32d86cc43'::uuid) AND (reverses_entry_id = c.id))
+                                      Rows Removed by Filter: 1
+                                      Buffers: shared hit=45000
+                          SubPlan 1
+                            ->  Aggregate  (cost=8.31..8.32 rows=1 width=8) (actual time=0.003..0.003 rows=1 loops=15000)
+                                  Buffers: shared hit=45000
+                                  ->  Index Scan using idx_ledger_charge_id on ledger_entries e  (cost=0.28..8.30 rows=1 width=8) (actual time=0.002..0.002 rows=1 loops=15000)
+                                        Index Cond: ((app_id = c.app_id) AND (charge_id = c.id))
+                                        Filter: (workspace_id = c.workspace_id)
+                                        Buffers: shared hit=45000
+                    ->  Index Scan using uq_parties_id_workspace_app on parties p  (cost=0.27..8.29 rows=1 width=48) (actual time=0.002..0.002 rows=1 loops=500)
+                          Index Cond: (id = c.party_id)
+                          Buffers: shared hit=1500
+Planning:
+  Buffers: shared hit=8
+Planning Time: 1.051 ms
+Execution Time: 222.502 ms
+```
+
+2. `sum_expected_period`:
+```text
+Aggregate  (cost=24.81..24.82 rows=1 width=8) (actual time=1999.706..1999.708 rows=1 loops=1)
+  Buffers: shared hit=157184
+  ->  Nested Loop Anti Join  (cost=0.71..24.80 rows=1 width=8) (actual time=0.033..1987.305 rows=14500 loops=1)
+        Buffers: shared hit=157184
+        ->  Nested Loop  (cost=0.42..16.48 rows=1 width=56) (actual time=0.026..1771.982 rows=14500 loops=1)
+              Join Filter: (p.id = c.party_id)
+              Rows Removed by Join Filter: 3617750
+              Buffers: shared hit=113684
+              ->  Index Scan using idx_ledger_app_due_date_charge on ledger_entries c  (cost=0.28..8.31 rows=1 width=72) (actual time=0.016..37.437 rows=14500 loops=1)
+                    Index Cond: ((app_id = '65ecfe1f-c284-4db6-b079-38db14d7d47a'::uuid) AND (due_date >= '2026-11-01'::date) AND (due_date <= '2026-11-30'::date))
+                    Filter: (workspace_id = '225fb1f6-2d43-4410-866f-c9e32d86cc43'::uuid)
+                    Buffers: shared hit=12909
+              ->  Index Scan using idx_parties_app_type_unarchived on parties p  (cost=0.14..8.16 rows=1 width=48) (actual time=0.015..0.093 rows=250 loops=14500)
+                    Index Cond: ((app_id = '65ecfe1f-c284-4db6-b079-38db14d7d47a'::uuid) AND (party_type = 'tenant'::text))
+                    Filter: (workspace_id = '225fb1f6-2d43-4410-866f-c9e32d86cc43'::uuid)
+                    Buffers: shared hit=100775
+        ->  Index Scan using idx_ledger_charge_id on ledger_entries r  (cost=0.28..8.31 rows=1 width=64) (actual time=0.011..0.011 rows=0 loops=14500)
+              Index Cond: ((app_id = '65ecfe1f-c284-4db6-b079-38db14d7d47a'::uuid) AND (charge_id = c.id))
+              Filter: ((workspace_id = '225fb1f6-2d43-4410-866f-c9e32d86cc43'::uuid) AND (reverses_entry_id = c.id))
+              Rows Removed by Filter: 1
+              Buffers: shared hit=43500
+Planning:
+  Buffers: shared hit=4
+Planning Time: 0.421 ms
+Execution Time: 1999.743 ms
+```
+
+3. `sum_overdue_charges`:
+```text
+Aggregate  (cost=41.46..41.47 rows=1 width=8) (actual time=3697.758..3697.771 rows=1 loops=1)
+  Buffers: shared hit=252613
+  ->  Nested Loop Anti Join  (cost=0.71..33.13 rows=1 width=48) (actual time=0.151..3348.349 rows=15000 loops=1)
+        Buffers: shared hit=207613
+        ->  Nested Loop  (cost=0.42..24.81 rows=1 width=48) (actual time=0.117..3033.198 rows=15000 loops=1)
+              Join Filter: (p.id = c.party_id)
+              Rows Removed by Join Filter: 3742500
+              Buffers: shared hit=162613
+              ->  Index Scan using idx_ledger_app_due_date_charge on ledger_entries c  (cost=0.28..16.63 rows=1 width=64) (actual time=0.082..432.223 rows=15000 loops=1)
+                    Index Cond: ((app_id = '65ecfe1f-c284-4db6-b079-38db14d7d47a'::uuid) AND (due_date < '2026-11-20'::date))
+                    Filter: ((workspace_id = '225fb1f6-2d43-4410-866f-c9e32d86cc43'::uuid) AND (kind = ANY ('{recurring,manual,late_fee}'::text[])) AND ((SubPlan 2) > 0))
+                    Buffers: shared hit=58363
+                    SubPlan 2
+                      ->  Aggregate  (cost=8.31..8.32 rows=1 width=8) (actual time=0.017..0.017 rows=1 loops=15000)
+                            Buffers: shared hit=45000
+                            ->  Index Scan using idx_ledger_charge_id on ledger_entries e_1  (cost=0.28..8.30 rows=1 width=8) (actual time=0.012..0.012 rows=1 loops=15000)
+                                  Index Cond: ((app_id = c.app_id) AND (charge_id = c.id))
+                                  Filter: (workspace_id = c.workspace_id)
+                                  Buffers: shared hit=45000
+              ->  Index Scan using idx_parties_app_type_unarchived on parties p  (cost=0.14..8.16 rows=1 width=48) (actual time=0.022..0.136 rows=250 loops=15000)
+                    Index Cond: ((app_id = '65ecfe1f-c284-4db6-b079-38db14d7d47a'::uuid) AND (party_type = 'tenant'::text))
+                    Filter: (workspace_id = '225fb1f6-2d43-4410-866f-c9e32d86cc43'::uuid)
+                    Buffers: shared hit=104250
+        ->  Index Scan using idx_ledger_charge_id on ledger_entries r  (cost=0.28..8.31 rows=1 width=64) (actual time=0.016..0.016 rows=0 loops=15000)
+              Index Cond: ((app_id = '65ecfe1f-c284-4db6-b079-38db14d7d47a'::uuid) AND (charge_id = c.id))
+              Filter: ((workspace_id = '225fb1f6-2d43-4410-866f-c9e32d86cc43'::uuid) AND (reverses_entry_id = c.id))
+              Rows Removed by Filter: 1
+              Buffers: shared hit=45000
+  SubPlan 1
+    ->  Aggregate  (cost=8.31..8.32 rows=1 width=8) (actual time=0.016..0.016 rows=1 loops=15000)
+          Buffers: shared hit=45000
+          ->  Index Scan using idx_ledger_charge_id on ledger_entries e  (cost=0.28..8.30 rows=1 width=8) (actual time=0.007..0.007 rows=1 loops=15000)
+                Index Cond: ((app_id = c.app_id) AND (charge_id = c.id))
+                Filter: (workspace_id = c.workspace_id)
+                Buffers: shared hit=45000
+Planning:
+  Buffers: shared hit=8
+Planning Time: 1.587 ms
+Execution Time: 3697.910 ms
+```

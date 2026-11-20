@@ -51,6 +51,13 @@ public class AppExceptionHandler {
         return pd;
     }
 
+    @ExceptionHandler(DashboardTimeoutException.class)
+    public ProblemDetail handleDashboardTimeout(DashboardTimeoutException ex) {
+        ProblemDetail pd = ProblemDetail.forStatusAndDetail(HttpStatus.SERVICE_UNAVAILABLE, "dashboard_timeout");
+        pd.setTitle("Service Unavailable");
+        return pd;
+    }
+
     @ExceptionHandler(HttpMessageNotReadableException.class)
     public ProblemDetail handleHttpMessageNotReadable(HttpMessageNotReadableException ex) {
         ProblemDetail pd = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, "invalid JSON syntax");
