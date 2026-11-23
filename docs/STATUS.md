@@ -145,3 +145,5 @@ None.
 - Tests need a healthy Docker. If a run fails in bulk (many errors after about 100 tests), restart Docker Desktop and capture the first error line before anything else.
 - Lease reminders cast a party date field with ::date after a regex filter; a malformed stored value (only possible through direct SQL edits) could fail that query. Reminder scans are capped at 5000 candidates per rule per run.
 - Index ledger_entries(charge_id) is added in PLAN-0015 (V11).
+- Dashboard charge widgets aggregate the app's whole ledger once per widget (bounded by the 20000-entry cap; 20 to 30 ms on a laptop for 20000 rows). Re-measure on Supabase in PLAN-0016.
+- Forms and dashboard no-store header is set by NoStoreFilter by path; new endpoints under those paths inherit it automatically.
