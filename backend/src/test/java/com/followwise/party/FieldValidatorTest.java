@@ -1,5 +1,6 @@
 package com.followwise.party;
 
+import com.followwise.appdef.FieldConstraints;
 import com.followwise.appdef.ValidationError;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -165,5 +166,106 @@ class FieldValidatorTest {
         assertFalse(res.isValid());
         assertEquals("/data/t_select", res.errors().get(0).path());
         assertEquals("invalid select option", res.errors().get(0).message());
+    }
+
+    @Test
+    void testSharedConstraintsLimits() throws Exception {
+        JsonNode typeNode = createAllTypesDefinition();
+
+        // 1. Text at limit and beyond
+        String textAtLimit = "a".repeat(FieldConstraints.TEXT_MAX_LENGTH);
+        String textBeyond = "a".repeat(FieldConstraints.TEXT_MAX_LENGTH + 1);
+
+        ObjectNode data = jsonMapper.createObjectNode().put("t_text", textAtLimit);
+        FieldValidationResult res = validator.validate(typeNode, data, null, null);
+        assertTrue(res.isValid());
+
+        data.put("t_text", textBeyond);
+        res = validator.validate(typeNode, data, null, null);
+        assertFalse(res.isValid());
+        assertEquals("/data/t_text", res.errors().get(0).path());
+
+        // 2. Email at limit and beyond
+        // "@example.com" has 12 chars
+        String emailDomain = "@example.com";
+        String emailUserAtLimit = "a".repeat(FieldConstraints.EMAIL_MAX_LENGTH - emailDomain.length());
+        String emailAtLimit = emailUserAtLimit + emailDomain;
+        String emailBeyond = emailUserAtLimit + "a" + emailDomain;
+
+        data.put("t_text", "Sample");
+        data.put("t_email", emailAtLimit);
+        res = validator.validate(typeNode, data, null, null);
+        assertTrue(res.isValid());
+
+        data.put("t_email", emailBeyond);
+        res = validator.validate(typeNode, data, null, null);
+        assertFalse(res.isValid());
+        assertEquals("/data/t_email", res.errors().get(0).path());
+        data.remove("t_email");
+
+        // 3. Phone min and max bounds
+        String phoneUnderMin = "1".repeat(FieldConstraints.PHONE_MIN_LENGTH - 1);
+        String phoneAtMin = "1".repeat(FieldConstraints.PHONE_MIN_LENGTH);
+        String phoneAtMax = "1".repeat(FieldConstraints.PHONE_MAX_LENGTH);
+        String phoneBeyondMax = "1".repeat(FieldConstraints.PHONE_MAX_LENGTH + 1);
+
+        data.put("t_phone", phoneUnderMin);
+        res = validator.validate(typeNode, data, null, null);
+        assertFalse(res.isValid());
+        assertEquals("/data/t_phone", res.errors().get(0).path());
+
+        data.put("t_phone", phoneAtMin);
+        res = validator.validate(typeNode, data, null, null);
+        assertTrue(res.isValid());
+
+        data.put("t_phone", phoneAtMax);
+        res = validator.validate(typeNode, data, null, null);
+        assertTrue(res.isValid());
+
+        data.put("t_phone", phoneBeyondMax);
+        res = validator.validate(typeNode, data, null, null);
+        assertFalse(res.isValid());
+        assertEquals("/data/t_phone", res.errors().get(0).path());
+        data.remove("t_phone");
+
+        // 4. Integer bounds
+        data.put("t_int", FieldConstraints.INTEGER_MIN);
+        res = validator.validate(typeNode, data, null, null);
+        assertTrue(res.isValid());
+
+        data.put("t_int", FieldConstraints.INTEGER_MIN - 1);
+        res = validator.validate(typeNode, data, null, null);
+        assertFalse(res.isValid());
+        assertEquals("/data/t_int", res.errors().get(0).path());
+
+        data.put("t_int", FieldConstraints.INTEGER_MAX);
+        res = validator.validate(typeNode, data, null, null);
+        assertTrue(res.isValid());
+
+        data.put("t_int", FieldConstraints.INTEGER_MAX + 1);
+        res = validator.validate(typeNode, data, null, null);
+        assertFalse(res.isValid());
+        assertEquals("/data/t_int", res.errors().get(0).path());
+        data.remove("t_int");
+
+        // 5. Money bounds
+        data.put("t_money", FieldConstraints.MONEY_MIN_CENTS);
+        res = validator.validate(typeNode, data, null, null);
+        assertTrue(res.isValid());
+
+        data.put("t_money", FieldConstraints.MONEY_MIN_CENTS - 1);
+        res = validator.validate(typeNode, data, null, null);
+        assertFalse(res.isValid());
+        assertEquals("/data/t_money", res.errors().get(0).path());
+
+        data.put("t_money", FieldConstraints.MONEY_MAX_CENTS);
+        res = validator.validate(typeNode, data, null, null);
+        assertTrue(res.isValid());
+
+        data.put("t_money", FieldConstraints.MONEY_MAX_CENTS + 1);
+        res = validator.validate(typeNode, data, null, null);
+        assertFalse(res.isValid());
+        assertEquals("/data/t_money", res.errors().get(0).path());
+        data.remove("t_money");
     }
 }

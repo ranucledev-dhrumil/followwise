@@ -1,0 +1,89 @@
+{
+  "definitionVersion": 1,
+  "appName": "Client Document Tracker",
+  "timezone": "America/New_York",
+  "currency": "USD",
+  "partyTypes": [
+    {
+      "id": "client",
+      "label": "Client",
+      "displayNameField": "name",
+      "listColumns": ["name", "email", "company"],
+      "fields": [
+        {
+          "id": "name",
+          "label": "Full Name",
+          "type": "text",
+          "required": true,
+          "hidden": false,
+          "readOnly": false,
+          "options": null,
+          "target": null,
+          "constraints": {
+            "minLength": 1,
+            "maxLength": 500
+          }
+        },
+        {
+          "id": "email",
+          "label": "Email Address",
+          "type": "email",
+          "required": true,
+          "hidden": false,
+          "readOnly": false,
+          "options": null,
+          "target": null,
+          "constraints": {
+            "maxLength": 254
+          }
+        },
+        {
+          "id": "company",
+          "label": "Company Name",
+          "type": "text",
+          "required": false,
+          "hidden": false,
+          "readOnly": false,
+          "options": null,
+          "target": null,
+          "constraints": {
+            "minLength": 1,
+            "maxLength": 500
+          }
+        }
+      ]
+    }
+  ],
+  "recordTypes": [],
+  "checklists": [
+    {
+      "id": "onboarding_docs",
+      "label": "Onboarding Documents",
+      "partyType": "client",
+      "items": [
+        {
+          "id": "gov_id",
+          "label": "Government Photo ID",
+          "required": true,
+          "dueOffsetDays": 7,
+          "expiryDays": 365
+        },
+        {
+          "id": "tax_form",
+          "label": "Tax Identification Form (W-9 / W-8)",
+          "required": true,
+          "dueOffsetDays": 7,
+          "expiryDays": null
+        },
+        {
+          "id": "proof_of_address",
+          "label": "Proof of Address",
+          "required": false,
+          "dueOffsetDays": 14,
+          "expiryDays": null
+        }
+      ]
+    }
+  ],
+  "chargeSchedules": []
+}

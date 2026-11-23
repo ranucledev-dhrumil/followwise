@@ -1,5 +1,6 @@
 package com.followwise.party;
 
+import com.followwise.appdef.FieldConstraints;
 import com.followwise.appdef.ValidationError;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.JsonNode;
@@ -17,10 +18,10 @@ import java.util.regex.Pattern;
 public class FieldValidator {
 
     private static final int MAX_ERRORS = 20;
-    private static final int MAX_SERIALIZED_BYTES = 16384;
+    private static final int MAX_SERIALIZED_BYTES = FieldConstraints.MAX_DATA_BYTES;
 
     private static final Pattern EMAIL_PATTERN = Pattern.compile("^[A-Za-z0-9._%+\\-]+@[A-Za-z0-9.\\-]+\\.[A-Za-z]{2,}$");
-    private static final Pattern PHONE_PATTERN = Pattern.compile("^[0-9+\\-\\(\\)\\s]{5,32}$");
+    private static final Pattern PHONE_PATTERN = Pattern.compile("^[0-9+\\-\\(\\)\\s]{" + FieldConstraints.PHONE_MIN_LENGTH + "," + FieldConstraints.PHONE_MAX_LENGTH + "}$");
     private static final Pattern DATE_PATTERN = Pattern.compile("^\\d{4}-\\d{2}-\\d{2}$");
     private static final DateTimeFormatter ISO_DATE_FORMATTER = DateTimeFormatter.ofPattern("uuuu-MM-dd")
             .withResolverStyle(ResolverStyle.STRICT);
@@ -159,13 +160,13 @@ public class FieldValidator {
         }
 
         String rawDisp = normalizedData.get(dispFieldId).asText().trim();
-        computedDisplayName = rawDisp.length() > 200 ? rawDisp.substring(0, 200) : rawDisp;
+        computedDisplayName = rawDisp.length() > FieldConstraints.MAX_DISPLAY_NAME_LENGTH ? rawDisp.substring(0, FieldConstraints.MAX_DISPLAY_NAME_LENGTH) : rawDisp;
 
-        // Check serialized data length <= 16384 bytes
+        // Check serialized data length <= MAX_DATA_BYTES
         try {
             byte[] bytes = jsonMapper.writeValueAsBytes(normalizedData);
             if (bytes.length > MAX_SERIALIZED_BYTES) {
-                addError(errors, "/data", "data exceeds maximum size of 16384 bytes");
+                addError(errors, "/data", "data exceeds maximum size of " + FieldConstraints.MAX_DATA_BYTES + " bytes");
                 return new FieldValidationResult(errors, null, null);
             }
         } catch (Exception e) {
@@ -194,7 +195,7 @@ public class FieldValidator {
             }
             return;
         }
-        if (trimmed.length() > 500) {
+        if (trimmed.length() > FieldConstraints.TEXT_MAX_LENGTH) {
             addError(errors, "/data/" + fieldId, "text too long");
             return;
         }
@@ -220,7 +221,7 @@ public class FieldValidator {
             }
             return;
         }
-        if (trimmed.length() > 254 || !EMAIL_PATTERN.matcher(trimmed).matches()) {
+        if (trimmed.length() > FieldConstraints.EMAIL_MAX_LENGTH || !EMAIL_PATTERN.matcher(trimmed).matches()) {
             addError(errors, "/data/" + fieldId, "invalid email format");
             return;
         }
@@ -239,7 +240,7 @@ public class FieldValidator {
             }
             return;
         }
-        if (trimmed.length() < 5 || trimmed.length() > 32 || !PHONE_PATTERN.matcher(trimmed).matches()) {
+        if (trimmed.length() < FieldConstraints.PHONE_MIN_LENGTH || trimmed.length() > FieldConstraints.PHONE_MAX_LENGTH || !PHONE_PATTERN.matcher(trimmed).matches()) {
             addError(errors, "/data/" + fieldId, "invalid phone format");
             return;
         }
@@ -276,7 +277,7 @@ public class FieldValidator {
             return;
         }
         long val = node.asLong();
-        if (val < -1_000_000_000L || val > 1_000_000_000L) {
+        if (val < FieldConstraints.INTEGER_MIN || val > FieldConstraints.INTEGER_MAX) {
             addError(errors, "/data/" + fieldId, "invalid integer value");
             return;
         }
@@ -289,7 +290,7 @@ public class FieldValidator {
             return;
         }
         long val = node.asLong();
-        if (val < 0L || val > 100_000_000_000L) {
+        if (val < FieldConstraints.MONEY_MIN_CENTS || val > FieldConstraints.MONEY_MAX_CENTS) {
             addError(errors, "/data/" + fieldId, "invalid money value");
             return;
         }
