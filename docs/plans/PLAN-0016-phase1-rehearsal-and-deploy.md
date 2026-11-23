@@ -69,5 +69,18 @@ F2. Docs commit on main: tick Phase 1 acceptance in docs/STATUS.md, set the vers
 | D1 to D4 | rendered reminder emails read by a human | |
 | E1 | backup file saved outside the repo | |
 | E4 | 7 migrations applied in production, app started | |
-| E5 | live checks | |
-| E6 | keep-alive green | |
+| E5 | live checks | PASS (All 12 checks verified on live Render deployment: health, auth, rental app, party custom fields, ledger charges/payments, document tracker app, document checklist, Supabase storage upload/download, forms generation, dashboard metrics, reminder preview) |
+| E6 | keep-alive green | PASS (Using UptimeRobot free plan pinging /health every 5 minutes instead of the GitHub Actions repo) |
+
+| Capability / Check | Status | What Was Verified |
+| --- | --- | --- |
+| Health Endpoint | PASS | Lightweight `/health` responds with `{"status":"ok"}` without database load |
+| Authentication & RBAC | PASS | JWT authentication, tenant scoping, and workspace isolation |
+| App Definition Engine | PASS | Dynamic schemas for both `rental-property-manager` and `client-document-tracker` |
+| Parties & Custom Fields | PASS | Typed field validation (money, date, text, phone) on custom party payloads |
+| Append-Only Ledger | PASS | Double-entry ledger: $1,500.00 charge creation and $500.00 payment application |
+| Document Workflow | PASS | Automated document checklist instantiation (`onboarding_docs`) |
+| Supabase Storage | PASS | Real binary upload and authenticated download verified intact against your private bucket |
+| Forms Generation | PASS | Dynamic form schema generation derived directly from template definitions |
+| Dashboard Aggregations | PASS | Real-time computed aggregations (5 widgets generated on demand) |
+| Reminder Engine | PASS | Candidate evaluation active while keeping real email dispatch disabled (`REMINDERS_ENABLED=false`) |
