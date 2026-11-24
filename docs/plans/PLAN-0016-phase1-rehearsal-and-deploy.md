@@ -68,7 +68,7 @@ F2. Docs commit on main: tick Phase 1 acceptance in docs/STATUS.md, set the vers
 | C1 to C6 | real Supabase Storage | PASS |
 | D1 to D4 | rendered reminder emails read by a human | PASS |
 | E1 | backup file saved outside the repo | PASS |
-| E4 | 7 migrations applied in production, app started | PASS |
+| E4 | 7 migrations applied in production, app started |  |
 | E5 | live checks | PASS (All 12 checks verified on live Render deployment: health, auth, rental app, party custom fields, ledger charges/payments, document tracker app, document checklist, Supabase storage upload/download, forms generation, dashboard metrics, reminder preview) |
 | E6 | keep-alive green | PASS (Using UptimeRobot free plan pinging /health every 5 minutes instead of the GitHub Actions repo) |
 
